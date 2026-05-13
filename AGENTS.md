@@ -2,11 +2,17 @@
 
 ## Build & Test
 - `cargo check` — fast compile check (no warnings expected)
-- `cargo test` — runs all 37 unit tests (0.37s after compile)
+- `cargo test` — runs all 42 unit tests (~0.2s after compile)
 - `cargo build` — release/debug build
 - `cargo clippy` — linting (no custom clippy.toml)
 
 No CI, no pre-commit hooks, no rustfmt.toml.
+
+## PowerShell caveat
+`cargo` prints progress to stderr. In PowerShell, do NOT use `2>&1` with cargo — it triggers `NativeCommandError` red text even on success. Chain commands with `;` and check `$LASTEXITCODE`:
+```
+cargo clippy -- -D warnings; if ($LASTEXITCODE -eq 0) { cargo test }
+```
 
 ## Architecture
 Entrypoint: `src/main.rs` — if no subcommand, loads config + launches TUI.
@@ -34,7 +40,7 @@ Key modules:
 | `r` | Reload scan |
 | `n` | Add/edit note |
 | `m` | Change status |
-| `o` | Open project (prints path) |
+| `o` | Open menu (leader key) |
 | `Enter` | Record visit |
 | `D` | Toggle compact/detailed view |
 | `?` | Help overlay |

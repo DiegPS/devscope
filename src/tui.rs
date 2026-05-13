@@ -1,11 +1,14 @@
-use std::io;
-use std::process::Command;
+use std::io::{self, Write};
+use std::process::{self, Command, Stdio};
 
 use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
@@ -149,36 +152,9 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
     let args = action.resolve_args(path, name);
 
     if action.terminal_mode {
-        drop(io::stdout().lock());
-        let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
-
-        let mut cmd = Command::new(&resolved);
-        cmd.args(&args);
-        if action.current_dir {
-            cmd.current_dir(path);
-        }
-        match cmd.status() {
-            Ok(status) if status.success() => {
-                app.status_message = Some(format!("Opened {}: {}", action.name, name));
-            }
-            Ok(status) => {
-                app.status_message = Some(format!(
-                    "{} exited with code {}",
-                    action.name,
-                    status.code().unwrap_or(-1)
-                ));
-            }
-            Err(_) => {
-                app.status_message = Some(format!(
-                    "Could not open {}. Check config or PATH.",
-                    action.name
-                ));
-            }
-        }
-
-        let _ = enable_raw_mode();
-        let _ = execute!(io::stdout(), EnterAlternateScreen);
+        record_open(app, path);
+        restore_terminal_and_run(&resolved, &args, action.current_dir, path);
+        // never returns
     } else {
         let mut cmd = Command::new(&resolved);
         cmd.args(&args);
@@ -199,6 +175,44 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
     }
 
     record_open(app, path);
+}
+
+fn restore_terminal_and_run(
+    resolved: &str,
+    args: &[String],
+    use_current_dir: bool,
+    path: &std::path::Path,
+) -> ! {
+    // Release any stdout lock
+    drop(io::stdout().lock());
+
+    let mut stdout = io::stdout();
+
+    // Full terminal restoration
+    let _ = disable_raw_mode();
+    let _ = execute!(
+        stdout,
+        LeaveAlternateScreen,
+        crossterm::cursor::Show,
+        Clear(ClearType::All),
+    );
+    let _ = stdout.flush();
+
+    let mut cmd = Command::new(resolved);
+    cmd.args(args);
+    if use_current_dir {
+        cmd.current_dir(path);
+    }
+    cmd.stdin(Stdio::inherit());
+    cmd.stdout(Stdio::inherit());
+    cmd.stderr(Stdio::inherit());
+
+    let code = match cmd.status() {
+        Ok(s) => s.code().unwrap_or(1),
+        Err(_) => 1,
+    };
+
+    process::exit(code);
 }
 
 fn resolve_command(name: &str) -> String {
