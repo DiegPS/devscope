@@ -1,9 +1,11 @@
 mod app;
 mod cli;
+mod commands;
 mod config;
 mod detect;
 mod discover;
 mod git;
+mod health;
 mod input;
 mod project;
 mod scanner;

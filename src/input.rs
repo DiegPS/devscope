@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, Mode};
+use crate::app::{App, Mode, ViewMode};
 
 /// Handle a single key event and update app state accordingly.
 pub fn handle_key_event(app: &mut App, key: KeyEvent) {
@@ -75,6 +75,13 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
                     }
                 }
             }
+        }
+        KeyCode::Char('D') => {
+            app.toggle_view();
+            app.status_message = Some(match app.view_mode {
+                ViewMode::Compact => "Compact view".to_string(),
+                ViewMode::Detailed => "Detailed view".to_string(),
+            });
         }
         KeyCode::Char('?') => {
             app.mode = Mode::Help;

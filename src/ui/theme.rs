@@ -21,6 +21,10 @@ pub struct Theme {
     pub stack: Style,
     pub footer: Style,
     pub footer_key: Style,
+    pub health_good: Style,
+    pub health_warn: Style,
+    pub health_bad: Style,
+    pub ahead_behind: Style,
 }
 
 impl Default for Theme {
@@ -52,6 +56,10 @@ impl Default for Theme {
                 .bg(Color::DarkGray)
                 .fg(Color::LightCyan)
                 .add_modifier(ratatui::style::Modifier::BOLD),
+            health_good: Style::default().fg(Color::Green),
+            health_warn: Style::default().fg(Color::Yellow),
+            health_bad: Style::default().fg(Color::Red),
+            ahead_behind: Style::default().fg(Color::Cyan),
         }
     }
 }

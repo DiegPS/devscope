@@ -15,6 +15,12 @@ pub enum Mode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    Compact,
+    Detailed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortField {
     Activity,
     Name,
@@ -115,6 +121,7 @@ pub struct App {
     pub should_quit: bool,
     pub needs_reload: bool,
     pub status_message: Option<String>,
+    pub view_mode: ViewMode,
 }
 
 impl App {
@@ -142,6 +149,7 @@ impl App {
             should_quit: false,
             needs_reload: true,
             status_message: None,
+            view_mode: ViewMode::Detailed,
         };
         app.reload();
         app
@@ -327,6 +335,13 @@ impl App {
 
     pub fn filtered_count(&self) -> usize {
         self.filtered_indices.len()
+    }
+
+    pub fn toggle_view(&mut self) {
+        self.view_mode = match self.view_mode {
+            ViewMode::Compact => ViewMode::Detailed,
+            ViewMode::Detailed => ViewMode::Compact,
+        };
     }
 
     pub fn selected_path_str(&self) -> Option<String> {

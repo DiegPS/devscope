@@ -5,7 +5,7 @@ use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
-use crate::project::ProjectStatus;
+use crate::project::{HealthLevel, ProjectStatus};
 use crate::ui::theme::Theme;
 
 /// Render the details panel on the right side.
@@ -33,24 +33,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     )));
     lines.push(Line::from(""));
 
-    // Path (middle truncation)
+    // Path
     let path_str = project.path.display().to_string();
-    let path_label_w = 8; // "  Path: "
-    let path_max = inner_w.saturating_sub(path_label_w);
-    let path_truncated = truncate_middle(&path_str, path_max);
+    let path_label_w = 8;
+    let path_truncated = truncate_middle(&path_str, inner_w.saturating_sub(path_label_w));
     lines.push(label_value("Path", path_truncated, theme));
 
-    // Folder (always show, useful when path is truncated)
+    // Folder
     let folder = project
         .path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(&project.name);
-    let folder_line_w = 10; // "  Folder: "
     lines.push(Line::from(Span::styled(
         format!(
             "  Folder: {}",
-            truncate_end(folder, inner_w.saturating_sub(folder_line_w))
+            truncate_end(folder, inner_w.saturating_sub(10))
         ),
         theme.dim,
     )));
@@ -58,50 +56,89 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     // Stack
     if !project.stack.is_empty() {
         let stack_str = project.stack.join(", ");
-        let label_w = 9; // "  Stack: "
         lines.push(label_value(
             "Stack",
-            truncate_end(&stack_str, inner_w.saturating_sub(label_w)),
+            truncate_end(&stack_str, inner_w.saturating_sub(9)),
             theme,
         ));
     }
 
     // Manager
     if let Some(mgr) = &project.manager {
-        let label_w = 11; // "  Manager: "
         lines.push(label_value(
             "Manager",
-            truncate_end(mgr, inner_w.saturating_sub(label_w)),
-            theme,
-        ));
-    }
-
-    // Scripts
-    if !project.scripts.is_empty() {
-        let scripts_str = project.scripts.join(", ");
-        let label_w = 11; // "  Scripts: "
-        lines.push(label_value(
-            "Scripts",
-            truncate_end(&scripts_str, inner_w.saturating_sub(label_w)),
+            truncate_end(mgr, inner_w.saturating_sub(11)),
             theme,
         ));
     }
 
     lines.push(Line::from(""));
 
-    // Git info
+    // ── Health ────────────────────────────────────────────────────
+    let health_style = match project.health.level {
+        HealthLevel::Good => theme.health_good,
+        HealthLevel::Warn => theme.health_warn,
+        HealthLevel::Bad => theme.health_bad,
+        HealthLevel::Unknown => theme.dim,
+    };
+    lines.push(Line::from(vec![
+        Span::styled("  Health: ", theme.dim),
+        Span::styled(
+            format!(
+                "{} {}/100",
+                project.health.level.as_str(),
+                project.health.score
+            ),
+            health_style,
+        ),
+    ]));
+
+    // Positives
+    if !project.health.positives.is_empty() {
+        let pos_str = project.health.positives.join(", ");
+        lines.push(Line::from(Span::styled(
+            format!(
+                "    + {}",
+                truncate_end(&pos_str, inner_w.saturating_sub(6))
+            ),
+            theme.clean,
+        )));
+    }
+
+    // Warnings (health + project warnings combined)
+    let all_warnings = &project.warnings;
+    if !all_warnings.is_empty() {
+        let max_show = 6usize;
+        for (i, w) in all_warnings.iter().take(max_show).enumerate() {
+            let warn_max = inner_w.saturating_sub(6);
+            let text = truncate_end(&w.as_str(), warn_max);
+            if i < max_show {
+                lines.push(Line::from(Span::styled(
+                    format!("    ! {}", text),
+                    theme.warning,
+                )));
+            }
+        }
+        if all_warnings.len() > max_show {
+            lines.push(Line::from(Span::styled(
+                format!("    ... and {} more", all_warnings.len() - max_show),
+                theme.dim,
+            )));
+        }
+    }
+
+    lines.push(Line::from(""));
+
+    // ── Git info ──────────────────────────────────────────────────
     if let Some(git) = &project.git {
         lines.push(Line::from(Span::styled("  Git", theme.filter)));
 
-        // Branch
-        let label_w = 10; // "  Branch: "
         lines.push(label_value(
             "Branch",
-            truncate_end(&git.branch, inner_w.saturating_sub(label_w)),
+            truncate_end(&git.branch, inner_w.saturating_sub(10)),
             theme,
         ));
 
-        // Dirty
         let dirty_str = if git.is_dirty {
             format!(
                 "dirty, {} mod, {} untracked",
@@ -115,36 +152,58 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         } else {
             theme.clean
         };
-        let dirty_label_w = 11; // "  Dirty:  "
         lines.push(Line::from(vec![
             Span::styled("  Dirty:  ", theme.dim),
             Span::styled(
-                truncate_end(&dirty_str, inner_w.saturating_sub(dirty_label_w)),
+                truncate_end(&dirty_str, inner_w.saturating_sub(11)),
                 dirty_style,
             ),
         ]));
 
-        // Commit
         let commit_str = if git.last_commit_message.is_empty() {
             git.last_commit_hash.clone()
         } else {
             format!("{}  {}", git.last_commit_hash, git.last_commit_message)
         };
-        let label_w = 10; // "  Commit: "
         lines.push(label_value(
             "Commit",
-            truncate_end(&commit_str, inner_w.saturating_sub(label_w)),
+            truncate_end(&commit_str, inner_w.saturating_sub(10)),
             theme,
         ));
 
-        // Remote (middle truncation for URLs)
         if let Some(remote) = &git.remote_url {
-            let label_w = 10; // "  Remote: "
             lines.push(label_value(
                 "Remote",
-                truncate_middle(remote, inner_w.saturating_sub(label_w)),
+                truncate_middle(remote, inner_w.saturating_sub(10)),
                 theme,
             ));
+        }
+
+        if let Some(upstream) = &git.upstream {
+            lines.push(label_value(
+                "Upstream",
+                truncate_end(upstream, inner_w.saturating_sub(12)),
+                theme,
+            ));
+        } else if git.has_remote {
+            lines.push(Line::from(Span::styled("  Upstream: none", theme.dim)));
+        }
+
+        match (git.ahead, git.behind) {
+            (Some(a), Some(b)) if a > 0 || b > 0 => {
+                let mut parts = Vec::new();
+                if a > 0 {
+                    parts.push(format!("ahead {}", a));
+                }
+                if b > 0 {
+                    parts.push(format!("behind {}", b));
+                }
+                lines.push(Line::from(Span::styled(
+                    format!("  Ahead/Behind: {}", parts.join(", ")),
+                    theme.ahead_behind,
+                )));
+            }
+            _ => {}
         }
 
         lines.push(Line::from(""));
@@ -152,26 +211,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
     // Activity
     lines.push(Line::from(Span::styled("  Activity", theme.filter)));
-
-    let label_w = 14; // "  Last active: "
     lines.push(label_value(
         "Last active",
-        truncate_end(
-            &project.activity.relative_time,
-            inner_w.saturating_sub(label_w),
-        ),
+        truncate_end(&project.activity.relative_time, inner_w.saturating_sub(14)),
         theme,
     ));
-
     if let Some(date) = &project.activity.last_git_activity {
-        let label_w = 11; // "  Git date: "
         lines.push(label_value(
             "Git date",
-            truncate_end(date, inner_w.saturating_sub(label_w)),
+            truncate_end(date, inner_w.saturating_sub(11)),
             theme,
         ));
     }
-
     lines.push(Line::from(""));
 
     // Status
@@ -191,22 +242,23 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     if let Some(note) = &project.note {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled("  Note", theme.filter)));
-        let note_max = inner_w.saturating_sub(2);
         lines.push(Line::from(Span::styled(
-            format!("  {}", truncate_end(note, note_max)),
+            format!("  {}", truncate_end(note, inner_w.saturating_sub(2))),
             theme.note,
         )));
     }
 
-    // Warnings
-    if !project.warnings.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("  Warnings", theme.warning)));
-        for warning in &project.warnings {
-            let warn_max = inner_w.saturating_sub(4); // "  ! "
+    // Commands
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("  Commands", theme.filter)));
+    if project.commands.is_empty() {
+        lines.push(Line::from(Span::styled("    none detected", theme.dim)));
+    } else {
+        for cmd in &project.commands {
+            let cmd_max = inner_w.saturating_sub(4);
             lines.push(Line::from(Span::styled(
-                format!("  ! {}", truncate_end(warning.as_str(), warn_max)),
-                theme.warning,
+                format!("    {}", truncate_end(&cmd.command, cmd_max)),
+                theme.stack,
             )));
         }
     }
@@ -222,7 +274,6 @@ fn label_value(label: &str, value: String, theme: &Theme) -> Line<'static> {
     ])
 }
 
-/// Truncate text with a trailing ellipsis (…).
 fn truncate_end(text: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
@@ -233,7 +284,6 @@ fn truncate_end(text: &str, max_width: usize) -> String {
     if max_width <= 1 {
         return "…".to_string();
     }
-
     let limit = max_width.saturating_sub(1);
     let mut result = String::new();
     let mut w = 0;
@@ -249,7 +299,6 @@ fn truncate_end(text: &str, max_width: usize) -> String {
     result
 }
 
-/// Truncate text with an ellipsis in the middle (for paths and URLs).
 fn truncate_middle(text: &str, max_width: usize) -> String {
     if max_width <= 1 {
         return String::new();
@@ -260,14 +309,11 @@ fn truncate_middle(text: &str, max_width: usize) -> String {
     if max_width <= 3 {
         return "…".to_string();
     }
-
     let ellipsis = "…";
     let left_w = max_width.saturating_sub(1) * 2 / 5;
     let right_w = max_width.saturating_sub(left_w).saturating_sub(1);
-
     let left = take_width(text, left_w);
     let right = take_width_from_end(text, right_w);
-
     format!("{}{}{}", left, ellipsis, right)
 }
 

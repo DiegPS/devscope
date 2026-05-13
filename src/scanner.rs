@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use crate::config::{expand_tilde, normalize_path, Config};
 use crate::detect;
 use crate::git;
-use crate::project::{ActivityInfo, Project, ProjectStatus, ProjectWarning};
+use crate::project::{ActivityInfo, Project, ProjectStatus};
 
 /// Directories to skip during scanning.
 pub(crate) const SKIP_DIRS: &[&str] = &[
@@ -281,8 +281,13 @@ fn analyze_project(path: &Path, config: &Config) -> Option<Project> {
     // Activity info
     let activity = calculate_activity(path, &git_info);
 
-    // Warnings
-    let warnings = detect_warnings(path);
+    // Detect commands
+    let commands = crate::commands::detect_commands(path, &stack);
+
+    // Compute health (includes warnings)
+    let health =
+        crate::health::compute_health(path, &git_info, activity.timestamp, !commands.is_empty());
+    let warnings = health.warnings.clone();
 
     // Status (will be overridden by config if set)
     let status = determine_status(&activity, &git_info);
@@ -302,6 +307,8 @@ fn analyze_project(path: &Path, config: &Config) -> Option<Project> {
         status,
         note,
         warnings,
+        commands,
+        health,
     })
 }
 
@@ -444,26 +451,6 @@ fn parse_date_to_timestamp(date_str: &str) -> Option<i64> {
     chrono::NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M")
         .ok()
         .map(|naive| naive.and_utc().timestamp())
-}
-
-/// Detect warnings for a project.
-fn detect_warnings(path: &Path) -> Vec<ProjectWarning> {
-    let mut warnings = Vec::new();
-
-    // Check for .env file
-    if path.join(".env").exists() || path.join(".env.local").exists() {
-        warnings.push(ProjectWarning::EnvFilePresent);
-    }
-
-    // Check for missing README
-    if !path.join("README.md").exists()
-        && !path.join("readme.md").exists()
-        && !path.join("README").exists()
-    {
-        warnings.push(ProjectWarning::NoReadme);
-    }
-
-    warnings
 }
 
 /// Determine project status based on activity.

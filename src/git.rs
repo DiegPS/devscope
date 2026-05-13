@@ -9,17 +9,16 @@ use crate::project::GitInfo;
 pub fn get_git_info(repo_path: &Path) -> Result<GitInfo> {
     let repo = Repository::open(repo_path)?;
 
-    // Current branch
     let branch = get_current_branch(&repo);
-
-    // Last commit info
     let (last_hash, last_message, last_date) = get_last_commit_info(&repo);
-
-    // Working tree status
     let (is_dirty, modified, untracked) = get_working_tree_status(&repo);
-
-    // Remote origin
     let remote_url = get_remote_url(&repo);
+
+    let upstream = get_upstream_branch(&repo);
+    let (ahead, behind) = get_ahead_behind(&repo, &upstream);
+
+    let has_remote = remote_url.is_some();
+    let (remote_host, remote_repo) = parse_remote_info(remote_url.as_deref());
 
     Ok(GitInfo {
         branch,
@@ -30,6 +29,12 @@ pub fn get_git_info(repo_path: &Path) -> Result<GitInfo> {
         modified_count: modified,
         untracked_count: untracked,
         remote_url,
+        upstream,
+        ahead,
+        behind,
+        has_remote,
+        remote_host,
+        remote_repo,
     })
 }
 
@@ -38,6 +43,44 @@ fn get_current_branch(repo: &Repository) -> String {
         .ok()
         .and_then(|head| head.shorthand().map(String::from))
         .unwrap_or_else(|| "detached".to_string())
+}
+
+fn get_upstream_branch(repo: &Repository) -> Option<String> {
+    let head = repo.head().ok()?;
+    let branch = git2::Branch::wrap(head);
+    let upstream = branch.upstream().ok()?;
+    let name = upstream.name().ok()??; // Result<Option<&str>>
+    Some(name.to_string())
+}
+
+fn get_ahead_behind(
+    repo: &Repository,
+    upstream_name: &Option<String>,
+) -> (Option<usize>, Option<usize>) {
+    let upstream_name = match upstream_name {
+        Some(name) => name,
+        None => return (None, None),
+    };
+
+    let head = match repo.head().ok().and_then(|h| h.peel_to_commit().ok()) {
+        Some(c) => c,
+        None => return (None, None),
+    };
+    let local_oid = head.id();
+
+    let upstream_ref = match repo.find_reference(&format!("refs/remotes/{}", upstream_name)) {
+        Ok(r) => r,
+        Err(_) => return (None, None),
+    };
+    let upstream_oid = match upstream_ref.peel_to_commit().ok() {
+        Some(c) => c.id(),
+        None => return (None, None),
+    };
+
+    match repo.graph_ahead_behind(local_oid, upstream_oid) {
+        Ok((a, b)) => (Some(a), Some(b)),
+        Err(_) => (None, None),
+    }
 }
 
 fn get_last_commit_info(repo: &Repository) -> (String, String, String) {
@@ -112,12 +155,10 @@ fn get_remote_url(repo: &Repository) -> Option<String> {
 
 /// Remove tokens and credentials from remote URLs.
 fn sanitize_remote_url(url: &str) -> String {
-    // Handle SSH URLs: git@github.com:user/repo.git
     if url.starts_with("git@") {
         return url.to_string();
     }
 
-    // Handle HTTPS URLs: https://token@github.com/...
     if let Some(at_pos) = url.find('@') {
         let scheme_end = url.find("://").unwrap_or(0) + 3;
         if at_pos > scheme_end {
@@ -130,7 +171,55 @@ fn sanitize_remote_url(url: &str) -> String {
     url.to_string()
 }
 
+fn parse_remote_info(url: Option<&str>) -> (Option<String>, Option<String>) {
+    let url = match url {
+        Some(u) => u,
+        None => return (None, None),
+    };
+    let s = url.to_string();
+
+    // git@github.com:user/repo.git
+    if let Some(rest) = s.strip_prefix("git@") {
+        let parts: Vec<&str> = rest.splitn(2, ':').collect();
+        if parts.len() == 2 {
+            let host = parts[0].to_string();
+            let repo = parts[1].trim_end_matches(".git").to_string();
+            return (Some(host), Some(repo));
+        }
+    }
+
+    // https://github.com/user/repo.git
+    if let Some(rest) = s
+        .strip_prefix("https://")
+        .or_else(|| s.strip_prefix("http://"))
+    {
+        if let Some(at) = rest.find('@') {
+            let rest = &rest[at + 1..];
+            let parts: Vec<&str> = rest.splitn(3, '/').collect();
+            if parts.len() >= 3 {
+                let host = parts[0].to_string();
+                let repo = format!("{}/{}", parts[1], parts[2].trim_end_matches(".git"));
+                return (Some(host), Some(repo));
+            }
+        } else {
+            let parts: Vec<&str> = rest.splitn(3, '/').collect();
+            if parts.len() >= 3 {
+                let host = parts[0].to_string();
+                let repo = format!("{}/{}", parts[1], parts[2].trim_end_matches(".git"));
+                return (Some(host), Some(repo));
+            }
+        }
+    }
+
+    (None, None)
+}
+
 /// Check if a path is a Git repository.
 pub fn is_git_repo(path: &Path) -> bool {
     path.join(".git").exists()
+}
+
+/// Check if a branch name is a mainline branch.
+pub fn is_mainline_branch(branch: &str) -> bool {
+    matches!(branch, "main" | "master" | "develop" | "dev")
 }

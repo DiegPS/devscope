@@ -19,6 +19,7 @@ pub fn render_normal(frame: &mut Frame, area: Rect, _app: &App, theme: &Theme) {
         key_hint("o", "open", theme),
         key_hint("Enter", "visit", theme),
         key_hint("?", "help", theme),
+        key_hint("D", "view", theme),
         key_hint("q", "quit", theme),
     ];
 

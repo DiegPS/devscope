@@ -4,27 +4,47 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table};
 use ratatui::Frame;
 
-use crate::app::App;
-use crate::project::ProjectStatus;
+use crate::app::{App, ViewMode};
+use crate::health::format_git_label;
+use crate::project::{HealthLevel, ProjectStatus};
 use crate::ui::theme::Theme;
 
 /// Render the main project table in the left panel.
 pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let header = Row::new(vec![
-        Cell::from("Name"),
-        Cell::from("Stack"),
-        Cell::from("Activity"),
-        Cell::from("Status"),
-        Cell::from("Git"),
-        Cell::from("Note"),
-    ])
-    .style(theme.header)
-    .height(1);
+    let is_compact = matches!(app.view_mode, ViewMode::Compact);
+
+    let (header_cells, widths) = if is_compact {
+        (
+            vec!["Name", "Stack", "Git", "H"],
+            vec![
+                ratatui::layout::Constraint::Min(20),
+                ratatui::layout::Constraint::Length(18),
+                ratatui::layout::Constraint::Length(18),
+                ratatui::layout::Constraint::Length(4),
+            ],
+        )
+    } else {
+        (
+            vec!["Name", "Stack", "Activity", "Status", "Git", "Note", "H"],
+            vec![
+                ratatui::layout::Constraint::Length(20),
+                ratatui::layout::Constraint::Length(18),
+                ratatui::layout::Constraint::Length(8),
+                ratatui::layout::Constraint::Length(9),
+                ratatui::layout::Constraint::Length(16),
+                ratatui::layout::Constraint::Min(10),
+                ratatui::layout::Constraint::Length(4),
+            ],
+        )
+    };
+
+    let header = Row::new(header_cells.iter().map(|c| Cell::from(*c)))
+        .style(theme.header)
+        .height(1);
 
     let visible_rows = area.height.saturating_sub(3).max(1) as usize;
     let total = app.filtered_indices.len();
     let sel = app.selected;
-
     let scroll = calc_scroll(sel, visible_rows, total);
 
     let mut rows: Vec<Row> = Vec::new();
@@ -39,29 +59,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         let project = &app.projects[proj_idx];
         let is_selected = display_idx == sel;
 
-        let name = truncate_str(&project.name, 22);
-
-        let stack_str = project.stack.join("+");
-        let stack = truncate_str(&stack_str, 20);
-
-        let activity = project.activity.relative_time.clone();
-
-        let status = project.status.as_str();
-
-        let git_info = match &project.git {
-            Some(g) => {
-                let dirty_marker = if g.is_dirty { "*" } else { "" };
-                format!("{}{}", g.branch, dirty_marker)
-            }
-            None => "-".to_string(),
+        let sel_style = if is_selected {
+            theme.selected
+        } else {
+            Style::default()
         };
 
-        let note = project
-            .note
-            .as_deref()
-            .map(|n| truncate_str(n, 20))
-            .unwrap_or_default();
+        let row_style = sel_style;
 
+        let name = truncate_str(&project.name, if is_compact { 30 } else { 20 });
+        let stack_str = project.stack.join("+");
+        let stack = truncate_str(&stack_str, if is_compact { 16 } else { 18 });
+
+        let status = project.status.as_str();
         let status_style = match project.status {
             ProjectStatus::Active => theme.active,
             ProjectStatus::Paused => theme.paused,
@@ -70,81 +80,89 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             ProjectStatus::Unknown => theme.dim,
         };
 
+        let git_label = match &project.git {
+            Some(g) => format_git_label(g),
+            None => "-".to_string(),
+        };
         let git_style = if project.git.as_ref().is_some_and(|g| g.is_dirty) {
             theme.dirty
         } else {
             theme.clean
         };
 
-        let row_style = if is_selected {
-            theme.selected
-        } else {
-            Style::default()
+        let health_style = match project.health.level {
+            HealthLevel::Good => theme.health_good,
+            HealthLevel::Warn => theme.health_warn,
+            HealthLevel::Bad => theme.health_bad,
+            HealthLevel::Unknown => theme.dim,
+        };
+        let health_symbol = match project.health.level {
+            HealthLevel::Good => "✓",
+            HealthLevel::Warn => "!",
+            HealthLevel::Bad => "!!",
+            HealthLevel::Unknown => "?",
         };
 
-        let row = Row::new(vec![
-            Cell::from(Line::from(Span::styled(
-                name,
-                if is_selected {
-                    theme.selected
-                } else {
-                    theme.text
-                },
-            ))),
-            Cell::from(Line::from(Span::styled(
-                stack,
-                if is_selected {
-                    theme.selected
-                } else {
-                    theme.stack
-                },
-            ))),
-            Cell::from(Line::from(Span::styled(
+        let name_cell = Cell::from(Line::from(Span::styled(
+            name,
+            if is_selected { sel_style } else { theme.text },
+        )));
+        let stack_cell = Cell::from(Line::from(Span::styled(
+            stack,
+            if is_selected { sel_style } else { theme.stack },
+        )));
+        let health_cell = Cell::from(Line::from(Span::styled(
+            health_symbol.to_string(),
+            if is_selected { sel_style } else { health_style },
+        )));
+
+        if is_compact {
+            let git_cell = Cell::from(Line::from(Span::styled(
+                git_label,
+                if is_selected { sel_style } else { git_style },
+            )));
+
+            let row = Row::new(vec![name_cell, stack_cell, git_cell, health_cell]).style(row_style);
+            rows.push(row);
+        } else {
+            let activity = project.activity.relative_time.clone();
+
+            let note = project
+                .note
+                .as_deref()
+                .map(|n| truncate_str(n, 20))
+                .unwrap_or_default();
+
+            let git_cell = Cell::from(Line::from(Span::styled(
+                git_label,
+                if is_selected { sel_style } else { git_style },
+            )));
+            let activity_cell = Cell::from(Line::from(Span::styled(
                 activity,
-                if is_selected {
-                    theme.selected
-                } else {
-                    theme.dim
-                },
-            ))),
-            Cell::from(Line::from(Span::styled(
+                if is_selected { sel_style } else { theme.dim },
+            )));
+            let status_cell = Cell::from(Line::from(Span::styled(
                 status.to_string(),
-                if is_selected {
-                    theme.selected
-                } else {
-                    status_style
-                },
-            ))),
-            Cell::from(Line::from(Span::styled(
-                git_info,
-                if is_selected {
-                    theme.selected
-                } else {
-                    git_style
-                },
-            ))),
-            Cell::from(Line::from(Span::styled(
+                if is_selected { sel_style } else { status_style },
+            )));
+            let note_cell = Cell::from(Line::from(Span::styled(
                 note,
-                if is_selected {
-                    theme.selected
-                } else {
-                    theme.note
-                },
-            ))),
-        ])
-        .style(row_style);
+                if is_selected { sel_style } else { theme.note },
+            )));
 
-        rows.push(row);
+            let row = Row::new(vec![
+                name_cell,
+                stack_cell,
+                activity_cell,
+                status_cell,
+                git_cell,
+                note_cell,
+                health_cell,
+            ])
+            .style(row_style);
+            rows.push(row);
+        }
     }
-
-    let widths = [
-        ratatui::layout::Constraint::Length(22),
-        ratatui::layout::Constraint::Length(20),
-        ratatui::layout::Constraint::Length(10),
-        ratatui::layout::Constraint::Length(10),
-        ratatui::layout::Constraint::Length(15),
-        ratatui::layout::Constraint::Min(10),
-    ];
 
     let title = if total > visible_rows {
         format!(
@@ -184,20 +202,22 @@ fn calc_scroll(selected: usize, visible_rows: usize, total: usize) -> usize {
 fn truncate_str(s: &str, max_width: usize) -> String {
     use unicode_width::UnicodeWidthStr;
 
-    if s.width() <= max_width {
-        s.to_string()
-    } else {
-        let mut result = String::new();
-        let mut width = 0;
-        for ch in s.chars() {
-            let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
-            if width + ch_width + 3 > max_width {
-                result.push_str("...");
-                break;
-            }
-            result.push(ch);
-            width += ch_width;
-        }
-        result
+    if max_width == 0 {
+        return String::new();
     }
+    if s.width() <= max_width {
+        return s.to_string();
+    }
+    let mut result = String::new();
+    let mut width = 0;
+    for ch in s.chars() {
+        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+        if width + ch_width + 3 > max_width {
+            result.push_str("...");
+            break;
+        }
+        result.push(ch);
+        width += ch_width;
+    }
+    result
 }
