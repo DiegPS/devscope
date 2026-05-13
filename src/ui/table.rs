@@ -1,4 +1,4 @@
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table};
@@ -9,37 +9,21 @@ use crate::health::format_git_label;
 use crate::project::{HealthLevel, ProjectStatus};
 use crate::ui::theme::Theme;
 
-/// Render the main project table in the left panel.
 pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let is_compact = matches!(app.view_mode, ViewMode::Compact);
+    let inner_w = area.width.saturating_sub(2) as usize;
 
-    let (header_cells, widths) = if is_compact {
-        (
-            vec!["Name", "Stack", "Git", "H"],
-            vec![
-                ratatui::layout::Constraint::Min(20),
-                ratatui::layout::Constraint::Length(18),
-                ratatui::layout::Constraint::Length(18),
-                ratatui::layout::Constraint::Length(4),
-            ],
-        )
+    let (header_labels, widths) = if is_compact {
+        (vec!["Name", "Stack", "Git", "H"], compact_widths(inner_w))
     } else {
         (
             vec!["Name", "Stack", "Activity", "Status", "Git", "Note", "H"],
-            vec![
-                ratatui::layout::Constraint::Length(20),
-                ratatui::layout::Constraint::Length(18),
-                ratatui::layout::Constraint::Length(8),
-                ratatui::layout::Constraint::Length(9),
-                ratatui::layout::Constraint::Length(16),
-                ratatui::layout::Constraint::Min(10),
-                ratatui::layout::Constraint::Length(4),
-            ],
+            detailed_widths(inner_w),
         )
     };
 
-    let header = Row::new(header_cells.iter().map(|c| Cell::from(*c)))
-        .style(theme.header)
+    let header = Row::new(header_labels.iter().map(|c| Cell::from(*c)))
+        .style(theme.table_header)
         .height(1);
 
     let visible_rows = area.height.saturating_sub(3).max(1) as usize;
@@ -67,9 +51,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
         let row_style = sel_style;
 
-        let name = truncate_str(&project.name, if is_compact { 30 } else { 20 });
-        let stack_str = project.stack.join("+");
-        let stack = truncate_str(&stack_str, if is_compact { 16 } else { 18 });
+        let name_max = if is_compact {
+            inner_w.saturating_sub(38)
+        } else {
+            inner_w.saturating_sub(64)
+        };
+        let name = truncate_end(&project.name, name_max);
+
+        let stack_str = project.stack.join(" + ");
+        let stack = truncate_end(&stack_str, 15);
 
         let status = project.status.as_str();
         let status_style = match project.status {
@@ -82,7 +72,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
         let git_label = match &project.git {
             Some(g) => format_git_label(g),
-            None => "-".to_string(),
+            None => "\u{2014}".to_string(),
         };
         let git_style = if project.git.as_ref().is_some_and(|g| g.is_dirty) {
             theme.dirty
@@ -97,10 +87,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             HealthLevel::Unknown => theme.dim,
         };
         let health_symbol = match project.health.level {
-            HealthLevel::Good => "✓",
+            HealthLevel::Good => "\u{2713}",
             HealthLevel::Warn => "!",
-            HealthLevel::Bad => "!!",
-            HealthLevel::Unknown => "?",
+            HealthLevel::Bad => "\u{2717}",
+            HealthLevel::Unknown => "\u{2014}",
         };
 
         let name_cell = Cell::from(Line::from(Span::styled(
@@ -118,31 +108,29 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
         if is_compact {
             let git_cell = Cell::from(Line::from(Span::styled(
-                git_label,
+                truncate_end(&git_label, 15),
                 if is_selected { sel_style } else { git_style },
             )));
-
             let row = Row::new(vec![name_cell, stack_cell, git_cell, health_cell]).style(row_style);
             rows.push(row);
         } else {
             let activity = project.activity.relative_time.clone();
-
             let note = project
                 .note
                 .as_deref()
-                .map(|n| truncate_str(n, 20))
+                .map(|n| truncate_end(n, 14))
                 .unwrap_or_default();
 
             let git_cell = Cell::from(Line::from(Span::styled(
-                git_label,
+                truncate_end(&git_label, 14),
                 if is_selected { sel_style } else { git_style },
             )));
             let activity_cell = Cell::from(Line::from(Span::styled(
-                activity,
+                truncate_end(&activity, 7),
                 if is_selected { sel_style } else { theme.dim },
             )));
             let status_cell = Cell::from(Line::from(Span::styled(
-                status.to_string(),
+                truncate_end(status, 7),
                 if is_selected { sel_style } else { status_style },
             )));
             let note_cell = Cell::from(Line::from(Span::styled(
@@ -185,6 +173,29 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     frame.render_widget(table, area);
 }
 
+fn detailed_widths(inner_w: usize) -> Vec<Constraint> {
+    let name_w = inner_w.saturating_sub(64).max(10);
+    vec![
+        Constraint::Min(name_w as u16),
+        Constraint::Length(16),
+        Constraint::Length(8),
+        Constraint::Length(8),
+        Constraint::Length(15),
+        Constraint::Length(13),
+        Constraint::Length(4),
+    ]
+}
+
+fn compact_widths(inner_w: usize) -> Vec<Constraint> {
+    let name_w = inner_w.saturating_sub(38).max(10);
+    vec![
+        Constraint::Min(name_w as u16),
+        Constraint::Length(16),
+        Constraint::Length(18),
+        Constraint::Length(4),
+    ]
+}
+
 fn calc_scroll(selected: usize, visible_rows: usize, total: usize) -> usize {
     if total <= visible_rows {
         return 0;
@@ -199,25 +210,28 @@ fn calc_scroll(selected: usize, visible_rows: usize, total: usize) -> usize {
     }
 }
 
-fn truncate_str(s: &str, max_width: usize) -> String {
+pub fn truncate_end(text: &str, max_width: usize) -> String {
     use unicode_width::UnicodeWidthStr;
-
     if max_width == 0 {
         return String::new();
     }
-    if s.width() <= max_width {
-        return s.to_string();
+    if text.width() <= max_width {
+        return text.to_string();
     }
+    if max_width <= 1 {
+        return "\u{2026}".to_string();
+    }
+    let limit = max_width.saturating_sub(1);
     let mut result = String::new();
-    let mut width = 0;
-    for ch in s.chars() {
-        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
-        if width + ch_width + 3 > max_width {
-            result.push_str("...");
+    let mut w = 0;
+    for ch in text.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+        if w + cw > limit {
             break;
         }
         result.push(ch);
-        width += ch_width;
+        w += cw;
     }
+    result.push('\u{2026}');
     result
 }

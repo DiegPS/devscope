@@ -8,7 +8,8 @@ use crate::app::App;
 use crate::project::{HealthLevel, ProjectStatus};
 use crate::ui::theme::Theme;
 
-/// Render the details panel on the right side.
+const LABEL_WIDTH: usize = 12;
+
 pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -22,59 +23,46 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         return;
     };
 
-    let inner_w = area.width.saturating_sub(2).max(10) as usize;
+    let inner_w = area.width.saturating_sub(4).max(20) as usize;
 
     let mut lines: Vec<Line> = Vec::new();
 
-    // Project name
     lines.push(Line::from(Span::styled(
-        format!("  {}", truncate_end(&project.name, inner_w - 2)),
+        format!("  {}", truncate_end(&project.name, inner_w)),
         theme.title,
     )));
     lines.push(Line::from(""));
 
-    // Path
     let path_str = project.path.display().to_string();
-    let path_label_w = 8;
-    let path_truncated = truncate_middle(&path_str, inner_w.saturating_sub(path_label_w));
-    lines.push(label_value("Path", path_truncated, theme));
+    lines.push(aligned_line(
+        "Path",
+        &truncate_middle(&path_str, inner_w.saturating_sub(LABEL_WIDTH + 2)),
+        theme,
+    ));
 
-    // Folder
     let folder = project
         .path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(&project.name);
-    lines.push(Line::from(Span::styled(
-        format!(
-            "  Folder: {}",
-            truncate_end(folder, inner_w.saturating_sub(10))
-        ),
-        theme.dim,
-    )));
+    lines.push(aligned_line(
+        "Folder",
+        &truncate_end(folder, inner_w.saturating_sub(LABEL_WIDTH + 2)),
+        theme,
+    ));
 
-    // Stack
-    if !project.stack.is_empty() {
-        let stack_str = project.stack.join(", ");
-        lines.push(label_value(
-            "Stack",
-            truncate_end(&stack_str, inner_w.saturating_sub(9)),
-            theme,
-        ));
-    }
+    let stack_str = if project.stack.is_empty() {
+        "none".to_string()
+    } else {
+        project.stack.join(", ")
+    };
+    lines.push(aligned_line("Stack", &stack_str, theme));
 
-    // Manager
-    if let Some(mgr) = &project.manager {
-        lines.push(label_value(
-            "Manager",
-            truncate_end(mgr, inner_w.saturating_sub(11)),
-            theme,
-        ));
-    }
+    let manager_str = project.manager.as_deref().unwrap_or("none");
+    lines.push(aligned_line("Manager", manager_str, theme));
 
-    lines.push(Line::from(""));
+    lines.push(line_separator(inner_w, theme));
 
-    // ── Health ────────────────────────────────────────────────────
     let health_style = match project.health.level {
         HealthLevel::Good => theme.health_good,
         HealthLevel::Warn => theme.health_warn,
@@ -82,10 +70,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         HealthLevel::Unknown => theme.dim,
     };
     lines.push(Line::from(vec![
-        Span::styled("  Health: ", theme.dim),
+        Span::styled("  Health ", theme.section_title),
         Span::styled(
             format!(
-                "{} {}/100",
+                " {} {}/100",
                 project.health.level.as_str(),
                 project.health.score
             ),
@@ -93,55 +81,57 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         ),
     ]));
 
-    // Positives
-    if !project.health.positives.is_empty() {
-        let pos_str = project.health.positives.join(", ");
+    let max_items = 6usize;
+    let mut shown = 0usize;
+    for pos in &project.health.positives {
+        if shown >= max_items {
+            break;
+        }
         lines.push(Line::from(Span::styled(
             format!(
-                "    + {}",
-                truncate_end(&pos_str, inner_w.saturating_sub(6))
+                "    \u{2713} {}",
+                truncate_end(pos, inner_w.saturating_sub(6))
             ),
             theme.clean,
         )));
+        shown += 1;
     }
 
-    // Warnings (health + project warnings combined)
-    let all_warnings = &project.warnings;
-    if !all_warnings.is_empty() {
-        let max_show = 6usize;
-        for (i, w) in all_warnings.iter().take(max_show).enumerate() {
-            let warn_max = inner_w.saturating_sub(6);
-            let text = truncate_end(&w.as_str(), warn_max);
-            if i < max_show {
-                lines.push(Line::from(Span::styled(
-                    format!("    ! {}", text),
-                    theme.warning,
-                )));
-            }
+    for w in &project.warnings {
+        if shown >= max_items {
+            break;
         }
-        if all_warnings.len() > max_show {
-            lines.push(Line::from(Span::styled(
-                format!("    ... and {} more", all_warnings.len() - max_show),
-                theme.dim,
-            )));
-        }
+        let text = truncate_end(&w.as_str(), inner_w.saturating_sub(6));
+        lines.push(Line::from(Span::styled(
+            format!("    ! {}", text),
+            theme.warning,
+        )));
+        shown += 1;
     }
 
-    lines.push(Line::from(""));
+    let total_items = project.health.positives.len() + project.warnings.len();
+    if total_items > max_items {
+        lines.push(Line::from(Span::styled(
+            format!("    \u{2026} and {} more", total_items - max_items),
+            theme.dim,
+        )));
+    } else if project.health.positives.is_empty() && project.warnings.is_empty() {
+        lines.push(Line::from(Span::styled("    no health data", theme.dim)));
+    }
 
-    // ── Git info ──────────────────────────────────────────────────
     if let Some(git) = &project.git {
-        lines.push(Line::from(Span::styled("  Git", theme.filter)));
+        lines.push(line_separator(inner_w, theme));
+        lines.push(Line::from(Span::styled("  Git", theme.section_title)));
 
-        lines.push(label_value(
+        lines.push(aligned_line(
             "Branch",
-            truncate_end(&git.branch, inner_w.saturating_sub(10)),
+            &truncate_end(&git.branch, inner_w.saturating_sub(LABEL_WIDTH + 2)),
             theme,
         ));
 
         let dirty_str = if git.is_dirty {
             format!(
-                "dirty, {} mod, {} untracked",
+                "{} mod, {} untracked",
                 git.modified_count, git.untracked_count
             )
         } else {
@@ -153,79 +143,88 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             theme.clean
         };
         lines.push(Line::from(vec![
-            Span::styled("  Dirty:  ", theme.dim),
-            Span::styled(
-                truncate_end(&dirty_str, inner_w.saturating_sub(11)),
-                dirty_style,
-            ),
+            Span::styled(pad_label("Dirty"), theme.dim),
+            Span::styled(dirty_str, dirty_style),
         ]));
 
         let commit_str = if git.last_commit_message.is_empty() {
             git.last_commit_hash.clone()
         } else {
-            format!("{}  {}", git.last_commit_hash, git.last_commit_message)
+            format!(
+                "{} {}",
+                truncate_end(&git.last_commit_hash, 7),
+                truncate_end(
+                    &git.last_commit_message,
+                    inner_w.saturating_sub(LABEL_WIDTH + 10)
+                )
+            )
         };
-        lines.push(label_value(
-            "Commit",
-            truncate_end(&commit_str, inner_w.saturating_sub(10)),
-            theme,
-        ));
+        lines.push(aligned_line("Commit", &commit_str, theme));
 
-        if let Some(remote) = &git.remote_url {
-            lines.push(label_value(
-                "Remote",
-                truncate_middle(remote, inner_w.saturating_sub(10)),
-                theme,
-            ));
-        }
-
-        if let Some(upstream) = &git.upstream {
-            lines.push(label_value(
-                "Upstream",
-                truncate_end(upstream, inner_w.saturating_sub(12)),
-                theme,
-            ));
-        } else if git.has_remote {
-            lines.push(Line::from(Span::styled("  Upstream: none", theme.dim)));
+        match (&git.remote_url, &git.upstream) {
+            (Some(remote), Some(upstream)) => {
+                lines.push(aligned_line(
+                    "Remote",
+                    &truncate_middle(remote, inner_w.saturating_sub(LABEL_WIDTH + 2)),
+                    theme,
+                ));
+                lines.push(aligned_line("Upstream", upstream, theme));
+            }
+            (Some(remote), None) => {
+                lines.push(aligned_line(
+                    "Remote",
+                    &truncate_middle(remote, inner_w.saturating_sub(LABEL_WIDTH + 2)),
+                    theme,
+                ));
+                if git.has_remote {
+                    lines.push(aligned_line("Upstream", "none", theme));
+                }
+            }
+            (None, _) => {
+                lines.push(aligned_line("Remote", "none", theme));
+            }
         }
 
         match (git.ahead, git.behind) {
             (Some(a), Some(b)) if a > 0 || b > 0 => {
                 let mut parts = Vec::new();
                 if a > 0 {
-                    parts.push(format!("ahead {}", a));
+                    parts.push(format!("\u{2191}{}", a));
                 }
                 if b > 0 {
-                    parts.push(format!("behind {}", b));
+                    parts.push(format!("\u{2193}{}", b));
                 }
                 lines.push(Line::from(Span::styled(
-                    format!("  Ahead/Behind: {}", parts.join(", ")),
+                    format!("  Ahead/behind  {}", parts.join(" ")),
                     theme.ahead_behind,
                 )));
             }
             _ => {}
         }
-
-        lines.push(Line::from(""));
+    } else {
+        lines.push(line_separator(inner_w, theme));
+        lines.push(Line::from(Span::styled("  Git", theme.section_title)));
+        lines.push(Line::from(Span::styled("    no git repository", theme.dim)));
     }
 
-    // Activity
-    lines.push(Line::from(Span::styled("  Activity", theme.filter)));
-    lines.push(label_value(
+    lines.push(line_separator(inner_w, theme));
+    lines.push(Line::from(Span::styled("  Activity", theme.section_title)));
+
+    lines.push(aligned_line(
         "Last active",
-        truncate_end(&project.activity.relative_time, inner_w.saturating_sub(14)),
+        &project.activity.relative_time,
         theme,
     ));
-    if let Some(date) = &project.activity.last_git_activity {
-        lines.push(label_value(
-            "Git date",
-            truncate_end(date, inner_w.saturating_sub(11)),
-            theme,
-        ));
-    }
-    lines.push(Line::from(""));
 
-    // Status
+    let git_date = project
+        .activity
+        .last_git_activity
+        .as_deref()
+        .unwrap_or("none");
+    lines.push(aligned_line("Git date", git_date, theme));
+
+    lines.push(line_separator(inner_w, theme));
+
     let status_style = match project.status {
         ProjectStatus::Active => theme.active,
         ProjectStatus::Paused => theme.paused,
@@ -234,31 +233,33 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         ProjectStatus::Unknown => theme.dim,
     };
     lines.push(Line::from(vec![
-        Span::styled("  Status: ", theme.dim),
+        Span::styled(pad_label("Status"), theme.dim),
         Span::styled(project.status.as_str(), status_style),
     ]));
 
-    // Note
-    if let Some(note) = &project.note {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("  Note", theme.filter)));
-        lines.push(Line::from(Span::styled(
-            format!("  {}", truncate_end(note, inner_w.saturating_sub(2))),
-            theme.note,
-        )));
-    }
+    let note_text = project.note.as_deref().unwrap_or("none");
+    lines.push(aligned_line("Note", note_text, theme));
 
-    // Commands
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("  Commands", theme.filter)));
+    lines.push(line_separator(inner_w, theme));
+    lines.push(Line::from(Span::styled("  Commands", theme.section_title)));
+
     if project.commands.is_empty() {
         lines.push(Line::from(Span::styled("    none detected", theme.dim)));
     } else {
-        for cmd in &project.commands {
-            let cmd_max = inner_w.saturating_sub(4);
+        let cmd_max = 6usize.min(project.commands.len());
+        for cmd in project.commands.iter().take(cmd_max) {
             lines.push(Line::from(Span::styled(
-                format!("    {}", truncate_end(&cmd.command, cmd_max)),
-                theme.stack,
+                format!(
+                    "    {}",
+                    truncate_end(&cmd.command, inner_w.saturating_sub(4))
+                ),
+                theme.command,
+            )));
+        }
+        if project.commands.len() > cmd_max {
+            lines.push(Line::from(Span::styled(
+                format!("    \u{2026} and {} more", project.commands.len() - cmd_max),
+                theme.dim,
             )));
         }
     }
@@ -267,11 +268,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     frame.render_widget(paragraph, area);
 }
 
-fn label_value(label: &str, value: String, theme: &Theme) -> Line<'static> {
+fn aligned_line(label: &str, value: &str, theme: &Theme) -> Line<'static> {
+    let value_style = if value == "none" || value == "not available" {
+        theme.dim
+    } else {
+        theme.text
+    };
     Line::from(vec![
-        Span::styled(format!("  {}: ", label), theme.dim),
-        Span::styled(value, theme.text),
+        Span::styled(pad_label(label), theme.dim),
+        Span::styled(truncate_end(value, 200), value_style),
     ])
+}
+
+fn pad_label(label: &str) -> String {
+    let w = label.width();
+    let padding = LABEL_WIDTH.saturating_sub(w);
+    format!("  {}{}", label, " ".repeat(padding))
+}
+
+fn line_separator(inner_w: usize, theme: &Theme) -> Line<'static> {
+    let sep_w = inner_w.min(60);
+    let sep_str = "\u{2500}".repeat(sep_w);
+    Line::from(Span::styled(sep_str, theme.dim))
 }
 
 fn truncate_end(text: &str, max_width: usize) -> String {
@@ -282,7 +300,7 @@ fn truncate_end(text: &str, max_width: usize) -> String {
         return text.to_string();
     }
     if max_width <= 1 {
-        return "…".to_string();
+        return "\u{2026}".to_string();
     }
     let limit = max_width.saturating_sub(1);
     let mut result = String::new();
@@ -295,7 +313,7 @@ fn truncate_end(text: &str, max_width: usize) -> String {
         result.push(ch);
         w += cw;
     }
-    result.push('…');
+    result.push('\u{2026}');
     result
 }
 
@@ -307,9 +325,9 @@ fn truncate_middle(text: &str, max_width: usize) -> String {
         return text.to_string();
     }
     if max_width <= 3 {
-        return "…".to_string();
+        return "\u{2026}".to_string();
     }
-    let ellipsis = "…";
+    let ellipsis = "\u{2026}";
     let left_w = max_width.saturating_sub(1) * 2 / 5;
     let right_w = max_width.saturating_sub(left_w).saturating_sub(1);
     let left = take_width(text, left_w);

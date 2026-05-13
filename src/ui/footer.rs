@@ -6,55 +6,36 @@ use ratatui::Frame;
 use crate::app::App;
 use crate::ui::theme::Theme;
 
-/// Render the normal mode footer with key hints.
 pub fn render_normal(frame: &mut Frame, area: Rect, _app: &App, theme: &Theme) {
-    let keys = vec![
-        key_hint("↑↓", "move", theme),
-        key_hint("/", "search", theme),
-        key_hint("f", "filter", theme),
-        key_hint("s", "sort", theme),
-        key_hint("n", "note", theme),
-        key_hint("m", "status", theme),
-        key_hint("r", "reload", theme),
-        key_hint("o", "open", theme),
-        key_hint("Enter", "visit", theme),
-        key_hint("?", "help", theme),
-        key_hint("D", "view", theme),
-        key_hint("q", "quit", theme),
-    ];
-
-    let line = Line::from(keys);
+    let line = build_footer(area.width, theme);
     let footer = Paragraph::new(line).style(theme.footer);
     frame.render_widget(footer, area);
 }
 
-/// Render the search mode footer.
 pub fn render_search(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let line = Line::from(vec![
-        Span::styled("  Search: ", theme.footer_key),
+        Span::styled("  ", theme.footer_key),
+        Span::styled("Search ", theme.footer_key),
         Span::styled(&app.search_query, theme.text),
-        Span::styled("█", theme.text),
-        Span::styled("  (Esc to cancel, Enter to confirm)", theme.dim),
+        Span::styled("\u{2588}", theme.text),
+        Span::styled("  (Esc cancel, Enter done)", theme.dim),
     ]);
-
     let footer = Paragraph::new(line).style(theme.footer);
     frame.render_widget(footer, area);
 }
 
-/// Render the note editing footer.
 pub fn render_note_edit(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let line = Line::from(vec![
-        Span::styled("  Note: ", theme.footer_key),
+        Span::styled("  ", theme.footer_key),
+        Span::styled("Note ", theme.footer_key),
         Span::styled(&app.note_input, theme.text),
-        Span::styled("█", theme.text),
-        Span::styled("  (Enter to save, Esc to cancel)", theme.dim),
+        Span::styled("\u{2588}", theme.text),
+        Span::styled("  (Enter save, Esc cancel)", theme.dim),
     ]);
-
     let footer = Paragraph::new(line).style(theme.footer);
     frame.render_widget(footer, area);
 }
 
-/// Render the status change footer.
 pub fn render_status_change(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let options: Vec<Span> = app
         .status_options
@@ -68,16 +49,19 @@ pub fn render_status_change(frame: &mut Frame, area: Rect, app: &App, theme: &Th
             };
             let mut items = vec![Span::styled(format!(" {} ", status.as_str()), style)];
             if i + 1 < app.status_options.len() {
-                items.push(Span::styled(" │ ", theme.dim));
+                items.push(Span::styled(" \u{2502} ", theme.dim));
             }
             items
         })
         .collect();
 
-    let mut line_items = vec![Span::styled("  Status: ", theme.footer_key)];
+    let mut line_items = vec![
+        Span::styled("  ", theme.footer_key),
+        Span::styled("Status ", theme.footer_key),
+    ];
     line_items.extend(options);
     line_items.push(Span::styled(
-        "  (↑↓ select, Enter confirm, Esc cancel)",
+        "  (arrows select, Enter confirm, Esc cancel)",
         theme.dim,
     ));
 
@@ -86,6 +70,46 @@ pub fn render_status_change(frame: &mut Frame, area: Rect, app: &App, theme: &Th
     frame.render_widget(footer, area);
 }
 
-fn key_hint<'a>(key: &'a str, label: &'a str, theme: &Theme) -> Span<'a> {
-    Span::styled(format!(" {}:{} ", key, label), theme.footer_key)
+fn build_footer(width: u16, theme: &Theme) -> Line<'static> {
+    let short = width < 90;
+    let sep = Span::styled(" \u{00B7} ", theme.footer_sep);
+
+    let pairs: Vec<(&str, &str)> = if short {
+        vec![
+            ("\u{2191}\u{2193}", "nav"),
+            ("/", "search"),
+            ("f", "filter"),
+            ("D", "view"),
+            ("?", "help"),
+            ("q", "quit"),
+        ]
+    } else {
+        vec![
+            ("\u{2191}\u{2193}", "nav"),
+            ("/", "search"),
+            ("f", "filter"),
+            ("s", "sort"),
+            ("n", "note"),
+            ("m", "status"),
+            ("r", "reload"),
+            ("o", "open"),
+            ("D", "view"),
+            ("?", "help"),
+            ("q", "quit"),
+        ]
+    };
+
+    let mut spans: Vec<Span> = Vec::new();
+    for (i, (key, label)) in pairs.iter().enumerate() {
+        if i > 0 {
+            spans.push(sep.clone());
+        }
+        spans.push(Span::styled(key.to_string(), theme.footer_key));
+        spans.push(Span::styled(format!(" {}", label), theme.footer_hint));
+    }
+
+    let mut line_spans = vec![Span::styled("  ", theme.footer_sep)];
+    line_spans.extend(spans);
+
+    Line::from(line_spans)
 }

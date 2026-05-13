@@ -51,36 +51,33 @@ fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, them
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(40)])
+        .constraints([Constraint::Min(0), Constraint::Length(45)])
         .split(area);
 
-    // Title
     let title = if let Some(ref msg) = app.status_message {
         Line::from(vec![
-            Span::styled("  devscope", theme.title),
-            Span::styled("  ", theme.text),
+            Span::styled(" ", theme.title),
+            Span::styled("devscope", theme.title),
+            Span::styled("  ", theme.dim),
             Span::styled(msg.as_str(), theme.active),
         ])
     } else {
         Line::from(vec![
-            Span::styled("  devscope", theme.title),
-            Span::styled("  ", theme.text),
-            Span::styled(
-                format!(
-                    "{} projects scanned in {}ms",
-                    app.total_projects, app.scan_duration_ms
-                ),
-                theme.dim,
-            ),
+            Span::styled(" ", theme.title),
+            Span::styled("devscope", theme.title),
+            Span::styled("  ", theme.dim),
+            Span::styled(format!("{}", app.total_projects), theme.count),
+            Span::styled(" projects", theme.muted),
+            Span::styled("  ", theme.dim),
+            Span::styled(format_scan_time(app.scan_duration_ms), theme.muted),
         ])
     };
     frame.render_widget(Paragraph::new(title), chunks[0]);
 
-    // Filter and count
     let info = Line::from(vec![
-        Span::styled("filter: ", theme.dim),
+        Span::styled("filter ", theme.muted),
         Span::styled(app.filter.as_str(), theme.filter),
-        Span::styled("  ", theme.text),
+        Span::styled("  ", theme.dim),
         Span::styled(
             format!("{}/{}", app.filtered_count(), app.total_projects),
             theme.count,
@@ -90,6 +87,14 @@ fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, them
         Paragraph::new(info).alignment(ratatui::layout::Alignment::Right),
         chunks[1],
     );
+}
+
+fn format_scan_time(ms: u128) -> String {
+    if ms < 1000 {
+        format!("{}ms", ms)
+    } else {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    }
 }
 
 fn render_help_overlay(
