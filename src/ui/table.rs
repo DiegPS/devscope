@@ -98,10 +98,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             name,
             if is_selected { sel_style } else { theme.text },
         )));
-        let stack_cell = Cell::from(Line::from(Span::styled(
-            stack,
-            if is_selected { sel_style } else { theme.stack },
-        )));
+        let stack_spans = if is_selected {
+            vec![Span::styled(stack.clone(), sel_style)]
+        } else {
+            colorize_stack(&stack, theme.stack)
+        };
+        let stack_cell = Cell::from(Line::from(stack_spans));
         let health_cell = Cell::from(Line::from(Span::styled(
             health_symbol.to_string(),
             if is_selected { sel_style } else { health_style },
@@ -238,4 +240,55 @@ pub fn truncate_end(text: &str, max_width: usize) -> String {
     }
     result.push('\u{2026}');
     result
+}
+
+fn colorize_stack(stack: &str, default_style: Style) -> Vec<Span<'static>> {
+    use ratatui::style::Color;
+    let mut spans = Vec::new();
+    let parts: Vec<&str> = stack.split(" + ").collect();
+
+    for (i, part) in parts.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" + ", default_style));
+        }
+
+        let lower = part.to_lowercase();
+        let fg_color = if lower.contains("rust") || lower.contains("cargo") {
+            Some(Color::Rgb(250, 130, 49)) // Bright orange
+        } else if lower.contains("node")
+            || lower.contains("npm")
+            || lower.contains("yarn")
+            || lower.contains("pnpm")
+        {
+            Some(Color::Rgb(136, 192, 87)) // Bright Node green
+        } else if lower.contains("flutter") || lower.contains("dart") {
+            Some(Color::Rgb(84, 197, 248)) // Bright Flutter blue
+        } else if lower.contains("go") {
+            Some(Color::Rgb(0, 200, 255)) // Bright Go cyan
+        } else if lower.contains("python") {
+            Some(Color::Rgb(255, 224, 90)) // Bright Python yellow
+        } else if lower.contains("react") {
+            Some(Color::Rgb(97, 218, 251)) // React light cyan
+        } else if lower.contains("vite") {
+            Some(Color::Rgb(173, 108, 255)) // Vite purple
+        } else if lower.contains("typescript") {
+            Some(Color::Rgb(97, 175, 239)) // TS bright blue
+        } else if lower.contains("electron") {
+            Some(Color::Rgb(159, 234, 249)) // Electron bright cyan
+        } else if lower.contains("docker") || lower.contains("compose") {
+            Some(Color::Rgb(36, 150, 237)) // Docker blue
+        } else {
+            None
+        };
+
+        let style = if let Some(c) = fg_color {
+            default_style.fg(c)
+        } else {
+            default_style
+        };
+
+        spans.push(Span::styled(part.to_string(), style));
+    }
+
+    spans
 }
