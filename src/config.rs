@@ -279,12 +279,16 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
     let mut actions = vec![
         OpenActionConfig {
             key: "o".to_string(),
-            name: "pi".to_string(),
-            command: Some("pi".to_string()),
+            name: "opencode".to_string(),
+            command: Some("opencode".to_string()),
             args: vec![".".to_string()],
             current_dir: true,
             terminal_mode: true,
-            env: std::collections::HashMap::new(),
+            env: {
+                let mut m = std::collections::HashMap::new();
+                m.insert("OPENCODE_DISABLE_MOUSE".to_string(), "true".to_string());
+                m
+            },
             kind: None,
         },
         OpenActionConfig {
