@@ -12,6 +12,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         Mode::ChangingStatus => handle_status_mode(app, key),
         Mode::Help => handle_help_mode(app, key),
         Mode::OpenMenu => handle_open_menu(app, key),
+        Mode::ConfigMenu => handle_config_menu(app, key),
     }
 }
 
@@ -61,6 +62,13 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
                 app.status_message = Some("No open actions configured".to_string());
             } else {
                 app.mode = Mode::OpenMenu;
+            }
+        }
+        KeyCode::Char(',') => {
+            if app.config.open.actions.is_empty() {
+                app.status_message = Some("No open actions configured".to_string());
+            } else {
+                app.mode = Mode::ConfigMenu;
             }
         }
         KeyCode::Char('D') => {
@@ -215,6 +223,48 @@ fn handle_open_menu(app: &mut App, key: KeyEvent) {
                         project_path,
                         project_name,
                         artifacts,
+                    });
+                    app.mode = Mode::Normal;
+                }
+                None => {
+                    app.status_message =
+                        Some(format!("No open action for key '{}'. Esc to cancel.", c));
+                    app.mode = Mode::Normal;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_config_menu(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.mode = Mode::Normal;
+        }
+        KeyCode::Char(c) => {
+            let action = app
+                .config
+                .open
+                .actions
+                .iter()
+                .find(|a| a.key_char().eq_ignore_ascii_case(&c))
+                .cloned();
+            match action {
+                Some(a) => {
+                    let config_dir = match crate::config::config_dir() {
+                        Ok(d) => d,
+                        Err(_) => {
+                            app.status_message = Some("Could not find config dir".to_string());
+                            app.mode = Mode::Normal;
+                            return;
+                        }
+                    };
+                    app.pending_action = Some(PendingOpenAction {
+                        action: a,
+                        project_path: config_dir,
+                        project_name: "devscope config".to_string(),
+                        artifacts: Vec::new(),
                     });
                     app.mode = Mode::Normal;
                 }

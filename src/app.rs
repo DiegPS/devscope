@@ -14,6 +14,7 @@ pub enum Mode {
     ChangingStatus,
     Help,
     OpenMenu,
+    ConfigMenu,
 }
 
 pub struct PendingOpenAction {

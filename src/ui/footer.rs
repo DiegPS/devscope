@@ -62,6 +62,32 @@ pub fn render_open_menu(frame: &mut Frame, area: Rect, app: &App, theme: &Theme)
     frame.render_widget(footer, area);
 }
 
+pub fn render_config_menu(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let sep = Span::styled(" \u{00B7} ", theme.footer_sep);
+    let mut spans: Vec<Span> = Vec::new();
+
+    spans.push(Span::styled("  CONFIG", theme.footer_key));
+    spans.push(sep.clone());
+
+    for (i, action) in app.config.open.actions.iter().enumerate() {
+        if i > 0 {
+            spans.push(sep.clone());
+        }
+        spans.push(Span::styled(
+            format!("{}", action.key_char()),
+            theme.footer_key,
+        ));
+        spans.push(Span::styled(format!(" {}", action.name), theme.footer_hint));
+    }
+
+    spans.push(sep);
+    spans.push(Span::styled("Esc cancel", theme.dim));
+
+    let line = Line::from(spans);
+    let footer = Paragraph::new(line).style(theme.footer);
+    frame.render_widget(footer, area);
+}
+
 pub fn render_status_change(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let options: Vec<Span> = app
         .status_options
@@ -119,6 +145,7 @@ fn build_footer(width: u16, theme: &Theme) -> Line<'static> {
             ("m", "status"),
             ("r", "reload"),
             ("o", "open"),
+            (",", "config"),
             ("D", "view"),
             ("?", "help"),
             ("q", "quit"),

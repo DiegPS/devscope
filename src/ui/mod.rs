@@ -41,6 +41,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
             footer::render_normal(frame, vertical[2], app, &theme);
         }
         crate::app::Mode::OpenMenu => footer::render_open_menu(frame, vertical[2], app, &theme),
+        crate::app::Mode::ConfigMenu => footer::render_config_menu(frame, vertical[2], app, &theme),
         crate::app::Mode::Normal => footer::render_normal(frame, vertical[2], app, &theme),
     }
 }
