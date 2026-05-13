@@ -1,4 +1,5 @@
 mod app;
+mod artifacts;
 mod cli;
 mod commands;
 mod config;

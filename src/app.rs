@@ -1,7 +1,8 @@
+use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::config::Config;
-use crate::project::{Project, ProjectStatus};
+use crate::config::{Config, OpenActionConfig};
+use crate::project::{Project, ProjectArtifact, ProjectStatus};
 use crate::scanner;
 use crate::scoring;
 
@@ -12,6 +13,14 @@ pub enum Mode {
     EditingNote,
     ChangingStatus,
     Help,
+    OpenMenu,
+}
+
+pub struct PendingOpenAction {
+    pub action: OpenActionConfig,
+    pub project_path: PathBuf,
+    pub project_name: String,
+    pub artifacts: Vec<ProjectArtifact>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,6 +131,7 @@ pub struct App {
     pub needs_reload: bool,
     pub status_message: Option<String>,
     pub view_mode: ViewMode,
+    pub pending_action: Option<PendingOpenAction>,
 }
 
 impl App {
@@ -150,6 +160,7 @@ impl App {
             needs_reload: true,
             status_message: None,
             view_mode: ViewMode::Detailed,
+            pending_action: None,
         };
         app.reload();
         app

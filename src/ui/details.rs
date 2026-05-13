@@ -5,7 +5,7 @@ use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
-use crate::project::{HealthLevel, ProjectStatus};
+use crate::project::{ArtifactKind, HealthLevel, ProjectStatus};
 use crate::ui::theme::Theme;
 
 const LABEL_WIDTH: usize = 12;
@@ -83,6 +83,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
     let max_items = 6usize;
     let mut shown = 0usize;
+    for w in &project.warnings {
+        if shown >= max_items {
+            break;
+        }
+        let text = truncate_end(&w.as_str(), inner_w.saturating_sub(6));
+        lines.push(Line::from(Span::styled(
+            format!("    ! {}", text),
+            theme.warning,
+        )));
+        shown += 1;
+    }
+
     for pos in &project.health.positives {
         if shown >= max_items {
             break;
@@ -93,18 +105,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 truncate_end(pos, inner_w.saturating_sub(6))
             ),
             theme.clean,
-        )));
-        shown += 1;
-    }
-
-    for w in &project.warnings {
-        if shown >= max_items {
-            break;
-        }
-        let text = truncate_end(&w.as_str(), inner_w.saturating_sub(6));
-        lines.push(Line::from(Span::styled(
-            format!("    ! {}", text),
-            theme.warning,
         )));
         shown += 1;
     }
@@ -259,6 +259,41 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         if project.commands.len() > cmd_max {
             lines.push(Line::from(Span::styled(
                 format!("    \u{2026} and {} more", project.commands.len() - cmd_max),
+                theme.dim,
+            )));
+        }
+    }
+
+    if !project.artifacts.is_empty() {
+        lines.push(line_separator(inner_w, theme));
+        lines.push(Line::from(Span::styled("  Artifacts", theme.section_title)));
+        let max_art = 6usize.min(project.artifacts.len());
+        for art in project.artifacts.iter().take(max_art) {
+            let icon = match art.kind {
+                ArtifactKind::Executable => "\u{25B6}",
+                ArtifactKind::Apk => "\u{25B6}",
+                ArtifactKind::Folder => "\u{25A1}",
+                ArtifactKind::Web => "\u{25A1}",
+                ArtifactKind::Bundle => "\u{25A1}",
+                ArtifactKind::Other => "\u{25A1}",
+            };
+            let (icon_style, label_style) = if art.exists {
+                (theme.clean, theme.text)
+            } else {
+                (theme.dim, theme.dim)
+            };
+            let text = truncate_end(&art.label, inner_w.saturating_sub(6));
+            lines.push(Line::from(vec![
+                Span::styled(format!("    {} ", icon), icon_style),
+                Span::styled(text, label_style),
+            ]));
+        }
+        if project.artifacts.len() > max_art {
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "    \u{2026} and {} more",
+                    project.artifacts.len() - max_art
+                ),
                 theme.dim,
             )));
         }

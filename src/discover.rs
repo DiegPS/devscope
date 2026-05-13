@@ -209,7 +209,7 @@ pub fn count_projects_under(root: &Path, max_depth: usize) -> Result<usize> {
         .follow_links(false);
 
     builder.filter_entry(move |entry| {
-        if !entry.file_type().map_or(false, |ft| ft.is_dir()) {
+        if !entry.file_type().is_some_and(|ft| ft.is_dir()) {
             return true;
         }
 
@@ -228,7 +228,7 @@ pub fn count_projects_under(root: &Path, max_depth: usize) -> Result<usize> {
     });
 
     for result in builder.build() {
-        if let Err(_) = result {
+        if result.is_err() {
             continue;
         }
     }

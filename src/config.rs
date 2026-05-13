@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
@@ -28,6 +28,9 @@ pub struct Config {
     pub ui: UiConfig,
 
     #[serde(default)]
+    pub open: OpenConfig,
+
+    #[serde(default)]
     pub project_status: std::collections::HashMap<String, String>,
 
     #[serde(default)]
@@ -35,6 +38,65 @@ pub struct Config {
 
     #[serde(default)]
     pub scores: ScoreMap,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenConfig {
+    #[serde(default)]
+    pub default: Option<String>,
+
+    #[serde(default = "default_open_actions")]
+    pub actions: Vec<OpenActionConfig>,
+}
+
+impl Default for OpenConfig {
+    fn default() -> Self {
+        Self {
+            default: None,
+            actions: default_open_actions(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenActionConfig {
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub current_dir: bool,
+    #[serde(default)]
+    pub terminal_mode: bool,
+    #[serde(default)]
+    pub kind: Option<OpenActionKind>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenActionKind {
+    Command,
+    FileManager,
+    BuildOutput,
+    Executable,
+}
+
+impl OpenActionConfig {
+    pub fn key_char(&self) -> char {
+        self.key.chars().next().unwrap_or(' ')
+    }
+
+    pub fn resolve_args(&self, path: &Path, name: &str) -> Vec<String> {
+        self.args
+            .iter()
+            .map(|a| {
+                a.replace("{path}", &path.to_string_lossy())
+                    .replace("{name}", name)
+            })
+            .collect()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,6 +142,7 @@ impl Default for Config {
             scan_hidden: false,
             follow_symlinks: false,
             ui: UiConfig::default(),
+            open: OpenConfig::default(),
             project_status: std::collections::HashMap::new(),
             notes: std::collections::HashMap::new(),
             scores: ScoreMap::new(),
@@ -208,4 +271,103 @@ pub fn record_open(config: &mut Config, path: &str) {
     let entry = config.scores.entry(path.to_string()).or_default();
     entry.opens = entry.opens.saturating_add(1);
     entry.last_used = Some(now);
+}
+
+fn default_open_actions() -> Vec<OpenActionConfig> {
+    let mut actions = vec![
+        OpenActionConfig {
+            key: "o".to_string(),
+            name: "opencode".to_string(),
+            command: Some("opencode".to_string()),
+            args: vec![".".to_string()],
+            current_dir: true,
+            terminal_mode: false,
+            kind: None,
+        },
+        OpenActionConfig {
+            key: "c".to_string(),
+            name: "cursor".to_string(),
+            command: Some("cursor".to_string()),
+            args: vec![".".to_string()],
+            current_dir: true,
+            terminal_mode: false,
+            kind: None,
+        },
+        OpenActionConfig {
+            key: "v".to_string(),
+            name: "vscode".to_string(),
+            command: Some("code".to_string()),
+            args: vec![".".to_string()],
+            current_dir: true,
+            terminal_mode: false,
+            kind: None,
+        },
+        OpenActionConfig {
+            key: "n".to_string(),
+            name: "nvim".to_string(),
+            command: Some("nvim".to_string()),
+            args: vec![".".to_string()],
+            current_dir: true,
+            terminal_mode: true,
+            kind: None,
+        },
+    ];
+
+    #[cfg(target_os = "windows")]
+    actions.push(OpenActionConfig {
+        key: "t".to_string(),
+        name: "terminal".to_string(),
+        command: Some("wt".to_string()),
+        args: vec!["-d".to_string(), "{path}".to_string()],
+        current_dir: false,
+        terminal_mode: false,
+        kind: None,
+    });
+
+    #[cfg(not(target_os = "windows"))]
+    actions.push(OpenActionConfig {
+        key: "t".to_string(),
+        name: "terminal".to_string(),
+        command: Some("open".to_string()),
+        args: vec![
+            "-a".to_string(),
+            "Terminal".to_string(),
+            "{path}".to_string(),
+        ],
+        current_dir: false,
+        terminal_mode: false,
+        kind: None,
+    });
+
+    actions.push(OpenActionConfig {
+        key: "f".to_string(),
+        name: "folder".to_string(),
+        command: None,
+        args: Vec::new(),
+        current_dir: false,
+        terminal_mode: false,
+        kind: Some(OpenActionKind::FileManager),
+    });
+
+    actions.push(OpenActionConfig {
+        key: "b".to_string(),
+        name: "build output".to_string(),
+        command: None,
+        args: Vec::new(),
+        current_dir: false,
+        terminal_mode: false,
+        kind: Some(OpenActionKind::BuildOutput),
+    });
+
+    actions.push(OpenActionConfig {
+        key: "x".to_string(),
+        name: "executable".to_string(),
+        command: None,
+        args: Vec::new(),
+        current_dir: false,
+        terminal_mode: false,
+        kind: Some(OpenActionKind::Executable),
+    });
+
+    actions
 }

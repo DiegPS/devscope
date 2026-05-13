@@ -238,10 +238,10 @@ pub(crate) fn is_project(dir: &Path) -> bool {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
-            if EXT_MARKERS.iter().any(|ext| name_str.ends_with(ext)) {
-                if entry.file_type().map_or(false, |ft| ft.is_file()) {
-                    return true;
-                }
+            if EXT_MARKERS.iter().any(|ext| name_str.ends_with(ext))
+                && entry.file_type().is_ok_and(|ft| ft.is_file())
+            {
+                return true;
             }
         }
     }
@@ -284,6 +284,9 @@ fn analyze_project(path: &Path, config: &Config) -> Option<Project> {
     // Detect commands
     let commands = crate::commands::detect_commands(path, &stack);
 
+    // Detect build artifacts
+    let artifacts = crate::artifacts::detect_artifacts(path, &stack);
+
     // Compute health (includes warnings)
     let health =
         crate::health::compute_health(path, &git_info, activity.timestamp, !commands.is_empty());
@@ -309,6 +312,7 @@ fn analyze_project(path: &Path, config: &Config) -> Option<Project> {
         warnings,
         commands,
         health,
+        artifacts,
     })
 }
 

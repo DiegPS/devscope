@@ -11,10 +11,10 @@ use crate::ui::theme::Theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     let is_compact = matches!(app.view_mode, ViewMode::Compact);
-    let inner_w = area.width.saturating_sub(2) as usize;
+    let inner_w = area.width.saturating_sub(2).max(1) as usize;
 
     let (header_labels, widths) = if is_compact {
-        (vec!["Name", "Stack", "Git", "H"], compact_widths(inner_w))
+        (vec!["Name", "Stack", "Git", "H"], compact_widths())
     } else {
         (
             vec!["Name", "Stack", "Activity", "Status", "Git", "Note", "H"],
@@ -52,14 +52,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         let row_style = sel_style;
 
         let name_max = if is_compact {
-            inner_w.saturating_sub(38)
+            inner_w * 48 / 100
         } else {
             inner_w.saturating_sub(64)
         };
         let name = truncate_end(&project.name, name_max);
 
         let stack_str = project.stack.join(" + ");
-        let stack = truncate_end(&stack_str, 15);
+        let stack_limit = if is_compact { 10 } else { 16 };
+        let stack = truncate_end(&stack_str, stack_limit);
 
         let status = project.status.as_str();
         let status_style = match project.status {
@@ -107,8 +108,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         )));
 
         if is_compact {
+            let git_limit = 14usize.min(inner_w * 24 / 100);
             let git_cell = Cell::from(Line::from(Span::styled(
-                truncate_end(&git_label, 15),
+                truncate_end(&git_label, git_limit),
                 if is_selected { sel_style } else { git_style },
             )));
             let row = Row::new(vec![name_cell, stack_cell, git_cell, health_cell]).style(row_style);
@@ -168,7 +170,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         .border_style(theme.border)
         .title(Span::styled(title, theme.header));
 
-    let table = Table::new(rows, widths).header(header).block(block);
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(block)
+        .column_spacing(1);
 
     frame.render_widget(table, area);
 }
@@ -186,13 +191,12 @@ fn detailed_widths(inner_w: usize) -> Vec<Constraint> {
     ]
 }
 
-fn compact_widths(inner_w: usize) -> Vec<Constraint> {
-    let name_w = inner_w.saturating_sub(38).max(10);
+fn compact_widths() -> Vec<Constraint> {
     vec![
-        Constraint::Min(name_w as u16),
-        Constraint::Length(16),
-        Constraint::Length(18),
-        Constraint::Length(4),
+        Constraint::Percentage(50),
+        Constraint::Percentage(20),
+        Constraint::Percentage(22),
+        Constraint::Percentage(8),
     ]
 }
 

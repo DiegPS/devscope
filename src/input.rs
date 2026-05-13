@@ -1,10 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, Mode, ViewMode};
+use crate::app::{App, Mode, PendingOpenAction, ViewMode};
 
-/// Handle a single key event and update app state accordingly.
 pub fn handle_key_event(app: &mut App, key: KeyEvent) {
-    // Clear transient status message on any key press
     app.status_message = None;
 
     match app.mode {
@@ -13,6 +11,7 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         Mode::EditingNote => handle_note_mode(app, key),
         Mode::ChangingStatus => handle_status_mode(app, key),
         Mode::Help => handle_help_mode(app, key),
+        Mode::OpenMenu => handle_open_menu(app, key),
     }
 }
 
@@ -58,22 +57,10 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char('o') => {
-            let project_id = app.selected_project().map(|p| p.id.clone());
-            let project_name = app
-                .selected_project()
-                .map(|p| p.name.clone())
-                .unwrap_or_default();
-            if let Some(ref id) = project_id {
-                crate::config::record_open(&mut app.config, id);
-                let _ = crate::config::save_config(&app.config);
-                match open::that(std::path::Path::new(id)) {
-                    Ok(()) => {
-                        app.status_message = Some(format!("Opened: {}", project_name));
-                    }
-                    Err(e) => {
-                        app.status_message = Some(format!("Error opening: {}", e));
-                    }
-                }
+            if app.config.open.actions.is_empty() {
+                app.status_message = Some("No open actions configured".to_string());
+            } else {
+                app.mode = Mode::OpenMenu;
             }
         }
         KeyCode::Char('D') => {
@@ -196,6 +183,47 @@ fn handle_help_mode(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Down | KeyCode::Char('j') => {
             app.help_scroll += 1;
+        }
+        _ => {}
+    }
+}
+
+fn handle_open_menu(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.mode = Mode::Normal;
+        }
+        KeyCode::Char(c) => {
+            let action = app
+                .config
+                .open
+                .actions
+                .iter()
+                .find(|a| a.key_char().eq_ignore_ascii_case(&c))
+                .cloned();
+            match action {
+                Some(a) => {
+                    let Some(project) = app.selected_project() else {
+                        app.mode = Mode::Normal;
+                        return;
+                    };
+                    let project_path = project.path.clone();
+                    let project_name = project.name.clone();
+                    let artifacts = project.artifacts.clone();
+                    app.pending_action = Some(PendingOpenAction {
+                        action: a,
+                        project_path,
+                        project_name,
+                        artifacts,
+                    });
+                    app.mode = Mode::Normal;
+                }
+                None => {
+                    app.status_message =
+                        Some(format!("No open action for key '{}'. Esc to cancel.", c));
+                    app.mode = Mode::Normal;
+                }
+            }
         }
         _ => {}
     }

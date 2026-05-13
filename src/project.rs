@@ -4,6 +4,36 @@ use std::path::PathBuf;
 use crate::commands::ProjectCommand;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ArtifactKind {
+    Executable,
+    Folder,
+    Apk,
+    Web,
+    Bundle,
+    Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectArtifact {
+    pub label: String,
+    pub path: PathBuf,
+    pub kind: ArtifactKind,
+    pub exists: bool,
+}
+
+impl ProjectArtifact {
+    pub fn new(label: &str, path: PathBuf, kind: ArtifactKind) -> Self {
+        let exists = path.exists();
+        Self {
+            label: label.to_string(),
+            path,
+            kind,
+            exists,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ProjectStatus {
     Active,
     Paused,
@@ -157,4 +187,5 @@ pub struct Project {
     pub warnings: Vec<ProjectWarning>,
     pub commands: Vec<ProjectCommand>,
     pub health: ProjectHealth,
+    pub artifacts: Vec<ProjectArtifact>,
 }
