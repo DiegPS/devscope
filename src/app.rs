@@ -164,6 +164,24 @@ impl App {
             pending_action: None,
         };
         app.reload();
+
+        let tui_apps = ["opencode", "pi", "nvim", "vim", "hx", "lazygit", "yazi"];
+        for action in &app.config.open.actions {
+            let is_tui = tui_apps.contains(&action.name.as_str())
+                || action
+                    .command
+                    .as_deref()
+                    .is_some_and(|c| tui_apps.contains(&c));
+
+            if is_tui && !action.terminal_mode {
+                app.status_message = Some(format!(
+                    "Warning: action '{}' is configured with terminal_mode=false. This may cause visual glitches. Set terminal_mode=true.",
+                    action.name
+                ));
+                break;
+            }
+        }
+
         app
     }
 
