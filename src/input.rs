@@ -4,6 +4,9 @@ use crate::app::{App, Mode};
 
 /// Handle a single key event and update app state accordingly.
 pub fn handle_key_event(app: &mut App, key: KeyEvent) {
+    // Clear transient status message on any key press
+    app.status_message = None;
+
     match app.mode {
         Mode::Normal => handle_normal_mode(app, key),
         Mode::Search => handle_search_mode(app, key),
@@ -56,13 +59,21 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('o') => {
             let project_id = app.selected_project().map(|p| p.id.clone());
-            if let Some(project) = app.selected_project() {
-                let path = project.path.display().to_string();
-                println!("{}", path);
-            }
+            let project_name = app
+                .selected_project()
+                .map(|p| p.name.clone())
+                .unwrap_or_default();
             if let Some(ref id) = project_id {
                 crate::config::record_open(&mut app.config, id);
                 let _ = crate::config::save_config(&app.config);
+                match open::that(std::path::Path::new(id)) {
+                    Ok(()) => {
+                        app.status_message = Some(format!("Opened: {}", project_name));
+                    }
+                    Err(e) => {
+                        app.status_message = Some(format!("Error opening: {}", e));
+                    }
+                }
             }
         }
         KeyCode::Char('?') => {

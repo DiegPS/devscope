@@ -55,17 +55,25 @@ fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, them
         .split(area);
 
     // Title
-    let title = Line::from(vec![
-        Span::styled("  devscope", theme.title),
-        Span::styled("  ", theme.text),
-        Span::styled(
-            format!(
-                "{} projects scanned in {}ms",
-                app.total_projects, app.scan_duration_ms
+    let title = if let Some(ref msg) = app.status_message {
+        Line::from(vec![
+            Span::styled("  devscope", theme.title),
+            Span::styled("  ", theme.text),
+            Span::styled(msg.as_str(), theme.active),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("  devscope", theme.title),
+            Span::styled("  ", theme.text),
+            Span::styled(
+                format!(
+                    "{} projects scanned in {}ms",
+                    app.total_projects, app.scan_duration_ms
+                ),
+                theme.dim,
             ),
-            theme.dim,
-        ),
-    ]);
+        ])
+    };
     frame.render_widget(Paragraph::new(title), chunks[0]);
 
     // Filter and count

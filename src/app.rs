@@ -114,6 +114,7 @@ pub struct App {
     pub help_scroll: usize,
     pub should_quit: bool,
     pub needs_reload: bool,
+    pub status_message: Option<String>,
 }
 
 impl App {
@@ -140,6 +141,7 @@ impl App {
             help_scroll: 0,
             should_quit: false,
             needs_reload: true,
+            status_message: None,
         };
         app.reload();
         app
