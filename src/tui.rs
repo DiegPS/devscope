@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use std::process::{self, Command, Stdio};
+use std::process::{Command, Stdio};
 
 use anyhow::Result;
 use crossterm::{
@@ -28,9 +28,9 @@ pub fn run_tui(config: Config) -> Result<()> {
 
     let result = run_loop(&mut terminal, &mut app);
 
-    disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
+    disable_raw_mode()?;
 
     result
 }
@@ -49,6 +49,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
 
         if let Some(pending) = app.pending_action.take() {
             execute_open_action(&pending, app);
+            terminal.clear()?;
         }
 
         if event::poll(std::time::Duration::from_millis(50))? {
@@ -153,13 +154,17 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
 
     if action.terminal_mode {
         record_open(app, path);
-        restore_terminal_and_run(&resolved, &args, action.current_dir, path);
-        // never returns
+        suspend_and_run(&resolved, &args, action.current_dir, path, &action.env);
+        // Force full redraw by telling terminal to clear on next frame if possible,
+        // but crossterm clear in suspend_and_run handles it.
     } else {
         let mut cmd = Command::new(&resolved);
         cmd.args(&args);
         if action.current_dir {
             cmd.current_dir(path);
+        }
+        for (k, v) in &action.env {
+            cmd.env(k, v);
         }
         match cmd.spawn() {
             Ok(_child) => {
@@ -177,42 +182,42 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
     record_open(app, path);
 }
 
-fn restore_terminal_and_run(
+fn suspend_and_run(
     resolved: &str,
     args: &[String],
     use_current_dir: bool,
     path: &std::path::Path,
-) -> ! {
+    env: &std::collections::HashMap<String, String>,
+) {
     // Release any stdout lock
     drop(io::stdout().lock());
 
     let mut stdout = io::stdout();
 
-    // Full terminal restoration
-    let _ = disable_raw_mode();
-    let _ = execute!(
-        stdout,
-        LeaveAlternateScreen,
-        crossterm::cursor::Show,
-        Clear(ClearType::All),
-    );
+    // 1. Suspend TUI
+    let _ = execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show,);
     let _ = stdout.flush();
+    let _ = disable_raw_mode();
 
+    // 2. Run the command synchronously
     let mut cmd = Command::new(resolved);
     cmd.args(args);
     if use_current_dir {
         cmd.current_dir(path);
     }
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
     cmd.stdin(Stdio::inherit());
     cmd.stdout(Stdio::inherit());
     cmd.stderr(Stdio::inherit());
 
-    let code = match cmd.status() {
-        Ok(s) => s.code().unwrap_or(1),
-        Err(_) => 1,
-    };
+    let _ = cmd.status();
 
-    process::exit(code);
+    // 3. Resume TUI
+    let _ = enable_raw_mode();
+    let _ = execute!(stdout, EnterAlternateScreen, Clear(ClearType::All));
+    let _ = stdout.flush();
 }
 
 fn resolve_command(name: &str) -> String {

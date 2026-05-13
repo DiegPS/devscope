@@ -71,6 +71,8 @@ pub struct OpenActionConfig {
     #[serde(default)]
     pub terminal_mode: bool,
     #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+    #[serde(default)]
     pub kind: Option<OpenActionKind>,
 }
 
@@ -282,6 +284,11 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
             args: vec![".".to_string()],
             current_dir: true,
             terminal_mode: true,
+            env: {
+                let mut m = std::collections::HashMap::new();
+                m.insert("OPENCODE_DISABLE_MOUSE".to_string(), "true".to_string());
+                m
+            },
             kind: None,
         },
         OpenActionConfig {
@@ -291,6 +298,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
             args: vec![".".to_string()],
             current_dir: false,
             terminal_mode: false,
+            env: std::collections::HashMap::new(),
             kind: None,
         },
         OpenActionConfig {
@@ -300,6 +308,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
             args: vec![".".to_string()],
             current_dir: false,
             terminal_mode: false,
+            env: std::collections::HashMap::new(),
             kind: None,
         },
         OpenActionConfig {
@@ -309,6 +318,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
             args: vec![".".to_string()],
             current_dir: true,
             terminal_mode: true,
+            env: std::collections::HashMap::new(),
             kind: None,
         },
         OpenActionConfig {
@@ -318,6 +328,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
             args: vec![".".to_string()],
             current_dir: true,
             terminal_mode: true,
+            env: std::collections::HashMap::new(),
             kind: None,
         },
         OpenActionConfig {
@@ -327,6 +338,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
             args: Vec::new(),
             current_dir: true,
             terminal_mode: true,
+            env: std::collections::HashMap::new(),
             kind: None,
         },
         OpenActionConfig {
@@ -336,6 +348,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
             args: Vec::new(),
             current_dir: true,
             terminal_mode: true,
+            env: std::collections::HashMap::new(),
             kind: None,
         },
     ];
@@ -348,6 +361,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
         args: vec!["-d".to_string(), "{path}".to_string()],
         current_dir: false,
         terminal_mode: false,
+        env: std::collections::HashMap::new(),
         kind: None,
     });
 
@@ -363,6 +377,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
         ],
         current_dir: false,
         terminal_mode: false,
+        env: std::collections::HashMap::new(),
         kind: None,
     });
 
@@ -373,6 +388,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
         args: Vec::new(),
         current_dir: false,
         terminal_mode: false,
+        env: std::collections::HashMap::new(),
         kind: Some(OpenActionKind::FileManager),
     });
 
@@ -383,6 +399,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
         args: Vec::new(),
         current_dir: false,
         terminal_mode: false,
+        env: std::collections::HashMap::new(),
         kind: Some(OpenActionKind::BuildOutput),
     });
 
@@ -393,6 +410,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
         args: Vec::new(),
         current_dir: false,
         terminal_mode: false,
+        env: std::collections::HashMap::new(),
         kind: Some(OpenActionKind::Executable),
     });
 
