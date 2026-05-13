@@ -292,6 +292,16 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
             kind: None,
         },
         OpenActionConfig {
+            key: "p".to_string(),
+            name: "pi".to_string(),
+            command: Some("pi".to_string()),
+            args: vec![".".to_string()],
+            current_dir: true,
+            terminal_mode: true,
+            env: std::collections::HashMap::new(),
+            kind: None,
+        },
+        OpenActionConfig {
             key: "c".to_string(),
             name: "cursor".to_string(),
             command: Some("cursor".to_string()),
