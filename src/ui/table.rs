@@ -54,12 +54,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         let name_max = if is_compact {
             inner_w * 48 / 100
         } else {
-            inner_w.saturating_sub(64)
+            inner_w.saturating_sub(74)
         };
         let name = truncate_end(&project.name, name_max);
 
         let stack_str = project.stack.join(" + ");
-        let stack_limit = if is_compact { 10 } else { 16 };
+        let stack_limit = if is_compact { inner_w * 20 / 100 } else { 26 };
         let stack = truncate_end(&stack_str, stack_limit);
 
         let status = project.status.as_str();
@@ -179,10 +179,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 }
 
 fn detailed_widths(inner_w: usize) -> Vec<Constraint> {
-    let name_w = inner_w.saturating_sub(64).max(10);
+    let name_w = inner_w.saturating_sub(74).max(10);
     vec![
         Constraint::Min(name_w as u16),
-        Constraint::Length(16),
+        Constraint::Length(26),
         Constraint::Length(8),
         Constraint::Length(8),
         Constraint::Length(15),
