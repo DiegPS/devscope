@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use anyhow::Result;
@@ -221,28 +222,33 @@ fn collect_subdirs_recursive(
     }
 }
 
+fn project_markers_set() -> &'static HashSet<&'static str> {
+    static SET: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    SET.get_or_init(|| PROJECT_MARKERS.iter().copied().collect())
+}
+
 /// Check if a directory is a project by looking for marker files.
+/// Uses a single `read_dir()` syscall instead of one per marker (28 → 1).
 pub(crate) fn is_project(dir: &Path) -> bool {
-    // Exact-filename markers
-    if PROJECT_MARKERS
-        .iter()
-        .any(|marker| dir.join(marker).exists())
-    {
-        return true;
-    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
 
-    // Extension-based markers (*.sln, *.csproj)
-    const EXT_MARKERS: &[&str] = &[".sln", ".csproj"];
+    let markers = project_markers_set();
 
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if EXT_MARKERS.iter().any(|ext| name_str.ends_with(ext))
-                && entry.file_type().is_ok_and(|ft| ft.is_file())
-            {
-                return true;
-            }
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        if markers.contains(name_str.as_ref()) {
+            return true;
+        }
+
+        if (name_str.ends_with(".sln") || name_str.ends_with(".csproj"))
+            && entry.file_type().is_ok_and(|ft| ft.is_file())
+        {
+            return true;
         }
     }
 
