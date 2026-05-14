@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::time::Instant;
 
 use crate::config::{Config, OpenActionConfig};
@@ -133,6 +135,7 @@ pub struct App {
     pub status_message: Option<String>,
     pub view_mode: ViewMode,
     pub pending_action: Option<PendingOpenAction>,
+    pub ports_rx: Option<mpsc::Receiver<HashMap<String, Vec<u16>>>>,
 }
 
 impl App {
@@ -162,6 +165,7 @@ impl App {
             status_message: None,
             view_mode: ViewMode::Detailed,
             pending_action: None,
+            ports_rx: None,
         };
         app.reload();
 
@@ -205,6 +209,25 @@ impl App {
         self.apply_filter_and_sort();
         self.selected = 0;
         self.needs_reload = false;
+
+        self.spawn_port_detection();
+    }
+
+    fn spawn_port_detection(&mut self) {
+        let paths: Vec<String> = self
+            .projects
+            .iter()
+            .map(|p| p.path.to_string_lossy().to_string())
+            .collect();
+        if paths.is_empty() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let map = crate::ports::detect_project_ports(&paths);
+            let _ = tx.send(map);
+        });
+        self.ports_rx = Some(rx);
     }
 
     pub fn apply_filter_and_sort(&mut self) {

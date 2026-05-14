@@ -313,6 +313,7 @@ fn analyze_project(path: &Path, config: &Config) -> Option<Project> {
         commands,
         health,
         artifacts,
+        ports: Vec::new(),
     })
 }
 

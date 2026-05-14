@@ -188,4 +188,6 @@ pub struct Project {
     pub commands: Vec<ProjectCommand>,
     pub health: ProjectHealth,
     pub artifacts: Vec<ProjectArtifact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ports: Vec<u16>,
 }

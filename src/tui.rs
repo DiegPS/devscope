@@ -39,6 +39,18 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
     loop {
         terminal.draw(|frame| ui::draw(frame, app))?;
 
+        if let Some(ref rx) = app.ports_rx {
+            if let Ok(port_map) = rx.try_recv() {
+                for project in &mut app.projects {
+                    let path_str = project.path.to_string_lossy().to_string();
+                    if let Some(ports) = port_map.get(&path_str) {
+                        project.ports = ports.clone();
+                    }
+                }
+                app.ports_rx = None;
+            }
+        }
+
         if app.needs_reload {
             app.reload();
         }

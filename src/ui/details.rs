@@ -299,6 +299,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         }
     }
 
+    if !project.ports.is_empty() {
+        lines.push(line_separator(inner_w, theme));
+        lines.push(Line::from(Span::styled("  Ports", theme.section_title)));
+        let ports_str: Vec<String> = project.ports.iter().map(|p| p.to_string()).collect();
+        let ports_display = ports_str.join(", ");
+        lines.push(Line::from(Span::styled(
+            format!("    \u{2192} {}", ports_display),
+            theme.command,
+        )));
+    }
+
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
 }

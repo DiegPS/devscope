@@ -8,6 +8,7 @@ mod discover;
 mod git;
 mod health;
 mod input;
+mod ports;
 mod project;
 mod scanner;
 mod scoring;
