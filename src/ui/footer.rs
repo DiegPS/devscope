@@ -140,7 +140,6 @@ fn build_footer(width: u16, app: &App, theme: &Theme) -> Line<'static> {
             ("r", "reload"),
             ("o", "open"),
             (",", "config"),
-            ("D", "view"),
             ("Enter", "visit"),
         ]
     };
