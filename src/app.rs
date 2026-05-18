@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::mpsc::{self, TryRecvError};
 use std::time::Instant;
 
 use crate::config::{Config, OpenActionConfig};
-use crate::project::{Project, ProjectArtifact, ProjectStatus};
+use crate::project::{DirtyStatus, Project, ProjectArtifact, ProjectStatus};
 use crate::scanner;
 use crate::scoring;
 
@@ -115,6 +115,14 @@ impl FilterField {
     }
 }
 
+struct HydrationResult {
+    project_id: String,
+    dirty_status: DirtyStatus,
+    modified_count: Option<usize>,
+    untracked_count: Option<usize>,
+    generation: u64,
+}
+
 pub struct App {
     pub config: Config,
     pub projects: Vec<Project>,
@@ -136,6 +144,8 @@ pub struct App {
     pub view_mode: ViewMode,
     pub pending_action: Option<PendingOpenAction>,
     pub ports_rx: Option<mpsc::Receiver<HashMap<String, Vec<u16>>>>,
+    hydration_generation: u64,
+    hydration_result_rx: Option<mpsc::Receiver<HydrationResult>>,
 }
 
 impl App {
@@ -166,6 +176,8 @@ impl App {
             view_mode: ViewMode::Detailed,
             pending_action: None,
             ports_rx: None,
+            hydration_generation: 0,
+            hydration_result_rx: None,
         };
         app.reload();
 
@@ -211,6 +223,7 @@ impl App {
         self.needs_reload = false;
 
         self.spawn_port_detection();
+        self.start_background_hydration();
     }
 
     fn spawn_port_detection(&mut self) {
@@ -257,7 +270,7 @@ impl App {
         match self.filter {
             FilterField::All => true,
             FilterField::Active => project.status == ProjectStatus::Active,
-            FilterField::Dirty => project.git.as_ref().is_some_and(|g| g.is_dirty),
+            FilterField::Dirty => project.git.as_ref().is_some_and(|g| g.dirty_status == DirtyStatus::Dirty),
             FilterField::Stale => project.status == ProjectStatus::Stale,
             FilterField::Paused => project.status == ProjectStatus::Paused,
             FilterField::Archived => project.status == ProjectStatus::Archived,
@@ -308,8 +321,8 @@ impl App {
             }
             SortField::Status => a.status.as_str().cmp(b.status.as_str()),
             SortField::DirtyFirst => {
-                let da = a.git.as_ref().is_some_and(|g| g.is_dirty);
-                let db = b.git.as_ref().is_some_and(|g| g.is_dirty);
+                let da = a.git.as_ref().is_some_and(|g| g.dirty_status == DirtyStatus::Dirty);
+                let db = b.git.as_ref().is_some_and(|g| g.dirty_status == DirtyStatus::Dirty);
                 db.cmp(&da).then_with(|| a.name.cmp(&b.name))
             }
             SortField::Path => a.path.cmp(&b.path),
@@ -396,6 +409,106 @@ impl App {
             ViewMode::Detailed => ViewMode::Compact,
         };
     }
+
+    fn start_background_hydration(&mut self) {
+        self.hydration_generation = self.hydration_generation.wrapping_add(1);
+        self.hydration_result_rx = None;
+
+        let gen = self.hydration_generation;
+
+        // Collect paths for all git repos; apply cache hits immediately
+        let mut jobs: Vec<(String, PathBuf)> = Vec::new();
+
+        // Collect indices+paths first to avoid borrow conflicts
+        let work: Vec<(usize, String, PathBuf)> = self
+            .projects
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.git.is_some())
+            .map(|(i, p)| (i, p.path.to_string_lossy().to_string(), p.path.clone()))
+            .collect();
+
+        for (i, path_str, path) in work {
+            if let Some(ref mut git) = self.projects[i].git {
+                git.dirty_status = DirtyStatus::Checking;
+            }
+            jobs.push((path_str, path));
+        }
+
+        if jobs.is_empty() {
+            return;
+        }
+
+        let (result_tx, result_rx) = mpsc::channel::<HydrationResult>();
+
+        std::thread::spawn(move || {
+            use rayon::prelude::*;
+            jobs.par_iter().for_each(|(id, path)| {
+                let (status, modified, untracked) =
+                    crate::git::get_git_status(path).unwrap_or((
+                        DirtyStatus::Error,
+                        None,
+                        None,
+                    ));
+                let _ = result_tx.send(HydrationResult {
+                    project_id: id.clone(),
+                    dirty_status: status,
+                    modified_count: modified,
+                    untracked_count: untracked,
+                    generation: gen,
+                });
+            });
+        });
+
+        self.hydration_result_rx = Some(result_rx);
+    }
+
+    pub fn poll_hydration_results(&mut self) -> bool {
+        let mut changed = false;
+
+        while self.hydration_result_rx.is_some() {
+            let recv_result = {
+                let rx = self.hydration_result_rx.as_ref().expect("checked is_some");
+                rx.try_recv()
+            };
+
+            match recv_result {
+                Ok(result) => {
+                    if result.generation != self.hydration_generation {
+                        continue;
+                    }
+
+                    if let Some(project) = self
+                        .projects
+                        .iter_mut()
+                        .find(|p| p.id == result.project_id)
+                    {
+                        if let Some(ref mut git) = project.git {
+                            git.dirty_status = result.dirty_status;
+                            git.modified_count = result.modified_count;
+                            git.untracked_count = result.untracked_count;
+                        }
+                        scanner::recompute_project_health(project);
+                    }
+
+                    changed = true;
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.hydration_result_rx = None;
+                    break;
+                }
+            }
+        }
+
+        if changed {
+            self.apply_filter_and_sort();
+        }
+
+        changed
+    }
+
+    pub fn prioritize_selected(&mut self) {}
 
     pub fn selected_path_str(&self) -> Option<String> {
         self.selected_project()

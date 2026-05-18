@@ -36,6 +36,8 @@ pub fn run_tui(config: Config) -> Result<()> {
 }
 
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> Result<()> {
+    let mut prev_selected = app.selected;
+
     loop {
         terminal.draw(|frame| ui::draw(frame, app))?;
 
@@ -53,6 +55,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
 
         if app.needs_reload {
             app.reload();
+            prev_selected = app.selected;
         }
 
         if app.should_quit {
@@ -63,6 +66,13 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
             execute_open_action(&pending, app);
             terminal.clear()?;
         }
+
+        if app.selected != prev_selected {
+            prev_selected = app.selected;
+            app.prioritize_selected();
+        }
+
+        app.poll_hydration_results();
 
         if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {

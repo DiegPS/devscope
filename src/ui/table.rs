@@ -6,7 +6,7 @@ use ratatui::Frame;
 
 use crate::app::{App, ViewMode};
 use crate::health::format_git_label;
-use crate::project::{HealthLevel, ProjectStatus};
+use crate::project::{DirtyStatus, HealthLevel, ProjectStatus};
 use crate::ui::theme::Theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
@@ -75,7 +75,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             Some(g) => format_git_label(g),
             None => "\u{2014}".to_string(),
         };
-        let git_style = if project.git.as_ref().is_some_and(|g| g.is_dirty) {
+        let git_style = if project.git.as_ref().is_some_and(|g| g.dirty_status == DirtyStatus::Dirty) {
             theme.dirty
         } else {
             theme.clean

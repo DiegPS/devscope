@@ -16,6 +16,7 @@ mod tui;
 mod ui;
 
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::Result;
 use clap::Parser;
@@ -60,13 +61,16 @@ fn main() -> Result<()> {
 }
 
 fn cmd_scan() -> Result<()> {
+    let start = Instant::now();
     let mut config = config::load_config()?;
     ensure_roots_or_auto_discover(&mut config)?;
-    let result = scanner::scan_roots(&config)?;
+    let mut result = scanner::scan_roots(&config)?;
+    scanner::hydrate_git_statuses(&mut result.projects);
+    let duration_ms = start.elapsed().as_millis();
 
     println!(
         "Scanned {} projects in {}ms\n",
-        result.projects_found, result.duration_ms
+        result.projects_found, duration_ms
     );
 
     for project in &result.projects {
@@ -75,7 +79,7 @@ fn cmd_scan() -> Result<()> {
         let activity = &project.activity.relative_time;
         let git_info = match &project.git {
             Some(g) => {
-                if g.is_dirty {
+                if g.dirty_status == crate::project::DirtyStatus::Dirty {
                     format!("{} (dirty)", g.branch)
                 } else {
                     g.branch.clone()
@@ -96,7 +100,8 @@ fn cmd_scan() -> Result<()> {
 fn cmd_list(json_output: bool) -> Result<()> {
     let mut config = config::load_config()?;
     ensure_roots_or_auto_discover(&mut config)?;
-    let result = scanner::scan_roots(&config)?;
+    let mut result = scanner::scan_roots(&config)?;
+    scanner::hydrate_git_statuses(&mut result.projects);
 
     if json_output {
         let json = serde_json::to_string_pretty(&result.projects)?;

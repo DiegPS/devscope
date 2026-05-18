@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::git;
-use crate::project::{GitInfo, HealthLevel, ProjectHealth, ProjectWarning};
+use crate::project::{DirtyStatus, GitInfo, HealthLevel, ProjectHealth, ProjectWarning};
 
 /// Calculate a health score (0-100) and collect warnings/positives.
 pub fn compute_health(
@@ -40,7 +40,7 @@ pub fn compute_health(
         if git_info.has_remote {
             positives.push("remote".to_string());
         }
-        if !git_info.is_dirty {
+        if git_info.dirty_status == DirtyStatus::Clean {
             positives.push("clean".to_string());
         }
         if git::is_mainline_branch(&git_info.branch) {
@@ -84,10 +84,13 @@ pub fn compute_health(
             warnings.push(ProjectWarning::NoRemote);
         }
 
-        if git_info.is_dirty {
+        if git_info.dirty_status == DirtyStatus::Dirty {
             score -= 12;
-            if git_info.modified_count + git_info.untracked_count > 10 {
+            warnings.push(ProjectWarning::DirtyWorkingTree);
+            let total = git_info.modified_count.unwrap_or(0) + git_info.untracked_count.unwrap_or(0);
+            if total > 10 {
                 score -= 8;
+                warnings.push(ProjectWarning::ManyUncommittedChanges(total));
             }
         }
 
@@ -241,7 +244,7 @@ fn detect_mixed_lockfiles(path: &Path) -> Option<String> {
 pub fn format_git_label(git: &GitInfo) -> String {
     let mut label = git.branch.clone();
 
-    if git.is_dirty {
+    if git.dirty_status == DirtyStatus::Dirty {
         label.push('*');
     }
 
@@ -357,9 +360,9 @@ mod tests {
             last_commit_hash: "abc".into(),
             last_commit_message: "msg".into(),
             last_commit_date: "2024".into(),
-            is_dirty: true,
-            modified_count: 1,
-            untracked_count: 0,
+            dirty_status: DirtyStatus::Dirty,
+            modified_count: Some(1),
+            untracked_count: Some(0),
             remote_url: None,
             upstream: None,
             ahead: Some(2),
@@ -369,6 +372,51 @@ mod tests {
             remote_repo: None,
         };
         assert_eq!(format_git_label(&git), "main* ↑2↓1");
+    }
+
+    #[test]
+    fn dirty_repo_penalties_are_visible_in_warnings() {
+        let git = GitInfo {
+            branch: "main".into(),
+            last_commit_hash: "abc".into(),
+            last_commit_message: "msg".into(),
+            last_commit_date: "2024".into(),
+            dirty_status: DirtyStatus::Dirty,
+            modified_count: Some(6),
+            untracked_count: Some(5),
+            remote_url: None,
+            upstream: None,
+            ahead: None,
+            behind: None,
+            has_remote: false,
+            remote_host: None,
+            remote_repo: None,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("README.md"), "# Test").unwrap();
+        fs::write(dir.path().join(".gitignore"), "target").unwrap();
+
+        let health = compute_health(
+            dir.path(),
+            &Some(git),
+            Some(chrono::Utc::now().timestamp()),
+            true,
+        );
+
+        assert!(health
+            .warnings
+            .iter()
+            .any(|w| matches!(w, ProjectWarning::DirtyWorkingTree)));
+        assert!(health
+            .warnings
+            .iter()
+            .any(|w| matches!(w, ProjectWarning::ManyUncommittedChanges(11))));
+        assert!(health
+            .warnings
+            .iter()
+            .any(|w| matches!(w, ProjectWarning::NoRemote)));
+        assert_eq!(health.score, 68);
     }
 
     #[test]

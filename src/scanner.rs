@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::config::{expand_tilde, normalize_path, Config};
 use crate::detect;
 use crate::git;
-use crate::project::{ActivityInfo, Project, ProjectStatus};
+use crate::project::{ActivityInfo, DirtyStatus, Project, ProjectStatus};
 
 /// Directories to skip during scanning.
 pub(crate) const SKIP_DIRS: &[&str] = &[
@@ -128,6 +128,25 @@ pub fn scan_roots(config: &Config) -> Result<ScanResult> {
         duration_ms,
         projects_found: count,
     })
+}
+
+/// Rehydrate expensive git working-tree status for already scanned projects.
+/// Intended for CLI flows where correctness matters more than first-paint
+/// latency.
+pub fn hydrate_git_statuses(projects: &mut [Project]) {
+    projects.par_iter_mut().for_each(hydrate_project_git_status);
+}
+
+/// Recompute derived health fields after git state changes.
+pub fn recompute_project_health(project: &mut Project) {
+    let health = crate::health::compute_health(
+        &project.path,
+        &project.git,
+        project.activity.timestamp,
+        !project.commands.is_empty(),
+    );
+    project.warnings = health.warnings.clone();
+    project.health = health;
 }
 
 fn scan_single_root(
@@ -277,9 +296,9 @@ fn analyze_project(path: &Path, config: &Config) -> Option<Project> {
     // Detect scripts
     let scripts = detect::detect_scripts(path);
 
-    // Git info
+    // Git info (fast — no working tree scan)
     let git_info = if git::is_git_repo(path) {
-        git::get_git_info(path).ok()
+        git::get_git_info_fast(path).ok()
     } else {
         None
     };
@@ -321,6 +340,23 @@ fn analyze_project(path: &Path, config: &Config) -> Option<Project> {
         artifacts,
         ports: Vec::new(),
     })
+}
+
+fn hydrate_project_git_status(project: &mut Project) {
+    if project.git.is_none() {
+        return;
+    }
+
+    let (dirty_status, modified_count, untracked_count) = crate::git::get_git_status(&project.path)
+        .unwrap_or((DirtyStatus::Error, None, None));
+
+    if let Some(git) = project.git.as_mut() {
+        git.dirty_status = dirty_status;
+        git.modified_count = modified_count;
+        git.untracked_count = untracked_count;
+    }
+
+    recompute_project_health(project);
 }
 
 /// Calculate activity information for a project.
@@ -494,4 +530,90 @@ fn determine_status(
     }
 
     ProjectStatus::Unknown
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use git2::{Repository, Signature};
+
+    use super::*;
+    use crate::project::{ActivityInfo, DirtyStatus, HealthLevel, ProjectHealth};
+
+    #[test]
+    fn hydrate_git_statuses_updates_dirty_state_and_health() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+
+        fs::write(dir.path().join("README.md"), "# test").unwrap();
+        fs::write(dir.path().join(".gitignore"), "target").unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
+        fs::write(dir.path().join("tracked.txt"), "v1").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("tracked.txt")).unwrap();
+        index.write().unwrap();
+
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let sig = Signature::now("devscope", "devscope@example.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+
+        fs::write(dir.path().join("tracked.txt"), "v2").unwrap();
+
+        let git = crate::git::get_git_info_fast(dir.path()).unwrap();
+        let initial_health = crate::health::compute_health(
+            dir.path(),
+            &Some(git.clone()),
+            Some(chrono::Utc::now().timestamp()),
+            true,
+        );
+
+        let mut project = Project {
+            id: dir.path().to_string_lossy().to_string(),
+            name: "test".to_string(),
+            path: dir.path().to_path_buf(),
+            stack: vec!["Rust".to_string()],
+            manager: Some("cargo".to_string()),
+            scripts: Vec::new(),
+            git: Some(git),
+            activity: ActivityInfo {
+                last_modified: None,
+                last_git_activity: None,
+                relative_time: "now".to_string(),
+                timestamp: Some(chrono::Utc::now().timestamp()),
+            },
+            status: ProjectStatus::Active,
+            note: None,
+            warnings: initial_health.warnings.clone(),
+            commands: vec![crate::commands::ProjectCommand {
+                label: "run".to_string(),
+                command: "cargo run".to_string(),
+                kind: crate::commands::ProjectCommandKind::Start,
+            }],
+            health: ProjectHealth {
+                score: initial_health.score,
+                level: initial_health.level.clone(),
+                positives: initial_health.positives.clone(),
+                warnings: initial_health.warnings.clone(),
+            },
+            artifacts: Vec::new(),
+            ports: Vec::new(),
+        };
+
+        let before_score = project.health.score;
+
+        hydrate_git_statuses(std::slice::from_mut(&mut project));
+
+        let git = project.git.as_ref().unwrap();
+        assert_eq!(git.dirty_status, DirtyStatus::Dirty);
+        assert_eq!(git.modified_count, Some(1));
+        assert!(project.health.score < before_score);
+        assert!(matches!(
+            project.health.level,
+            HealthLevel::Good | HealthLevel::Warn | HealthLevel::Bad
+        ));
+    }
 }

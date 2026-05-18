@@ -70,15 +70,25 @@ impl std::fmt::Display for ProjectStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DirtyStatus {
+    Unknown,
+    Queued,
+    Checking,
+    Clean,
+    Dirty,
+    Error,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitInfo {
     pub branch: String,
     pub last_commit_hash: String,
     pub last_commit_message: String,
     pub last_commit_date: String,
-    pub is_dirty: bool,
-    pub modified_count: usize,
-    pub untracked_count: usize,
+    pub dirty_status: DirtyStatus,
+    pub modified_count: Option<usize>,
+    pub untracked_count: Option<usize>,
     pub remote_url: Option<String>,
     pub upstream: Option<String>,
     pub ahead: Option<usize>,
@@ -108,6 +118,8 @@ pub enum ProjectWarning {
     OutdatedDependencies,
     NoRemote,
     NoUpstream,
+    DirtyWorkingTree,
+    ManyUncommittedChanges(usize),
     BranchAhead,
     BranchBehind,
     BranchDiverged,
@@ -132,6 +144,10 @@ impl ProjectWarning {
             Self::OutdatedDependencies => "outdated deps".to_string(),
             Self::NoRemote => "no git remote".to_string(),
             Self::NoUpstream => "no upstream branch".to_string(),
+            Self::DirtyWorkingTree => "working tree has uncommitted changes".to_string(),
+            Self::ManyUncommittedChanges(total) => {
+                format!("many uncommitted files: {}", total)
+            }
             Self::BranchAhead => "branch ahead of upstream".to_string(),
             Self::BranchBehind => "branch behind upstream".to_string(),
             Self::BranchDiverged => "branch diverged from upstream".to_string(),

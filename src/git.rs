@@ -3,15 +3,14 @@ use std::path::Path;
 use anyhow::Result;
 use git2::{Repository, StatusOptions};
 
-use crate::project::GitInfo;
+use crate::project::{DirtyStatus, GitInfo};
 
-/// Extract Git information from a repository path using libgit2.
-pub fn get_git_info(repo_path: &Path) -> Result<GitInfo> {
+/// Extract basic Git info (branch, remote, commits) without scanning the working tree.
+pub fn get_git_info_fast(repo_path: &Path) -> Result<GitInfo> {
     let repo = Repository::open(repo_path)?;
 
     let branch = get_current_branch(&repo);
     let (last_hash, last_message, last_date) = get_last_commit_info(&repo);
-    let (is_dirty, modified, untracked) = get_working_tree_status(&repo);
     let remote_url = get_remote_url(&repo);
 
     let upstream = get_upstream_branch(&repo);
@@ -25,9 +24,9 @@ pub fn get_git_info(repo_path: &Path) -> Result<GitInfo> {
         last_commit_hash: last_hash,
         last_commit_message: last_message,
         last_commit_date: last_date,
-        is_dirty,
-        modified_count: modified,
-        untracked_count: untracked,
+        dirty_status: DirtyStatus::Unknown,
+        modified_count: None,
+        untracked_count: None,
         remote_url,
         upstream,
         ahead,
@@ -36,6 +35,20 @@ pub fn get_git_info(repo_path: &Path) -> Result<GitInfo> {
         remote_host,
         remote_repo,
     })
+}
+
+/// Compute the dirty status (expensive — scans working tree).
+pub fn get_git_status(repo_path: &Path) -> Result<(DirtyStatus, Option<usize>, Option<usize>)> {
+    let repo = Repository::open(repo_path)?;
+    let (modified, untracked) = get_working_tree_status(&repo);
+
+    let status = if modified > 0 || untracked > 0 {
+        DirtyStatus::Dirty
+    } else {
+        DirtyStatus::Clean
+    };
+
+    Ok((status, Some(modified), Some(untracked)))
 }
 
 fn get_current_branch(repo: &Repository) -> String {
@@ -112,13 +125,15 @@ fn get_last_commit_info(repo: &Repository) -> (String, String, String) {
     (hash, message, date)
 }
 
-fn get_working_tree_status(repo: &Repository) -> (bool, usize, usize) {
+fn get_working_tree_status(repo: &Repository) -> (usize, usize) {
     let mut opts = StatusOptions::new();
     opts.include_untracked(true);
+    opts.include_ignored(false);
+    opts.renames_from_rewrites(false);
 
     let statuses = match repo.statuses(Some(&mut opts)) {
         Ok(statuses) => statuses,
-        Err(_) => return (false, 0, 0),
+        Err(_) => return (0, 0),
     };
 
     let mut modified = 0;
@@ -126,25 +141,23 @@ fn get_working_tree_status(repo: &Repository) -> (bool, usize, usize) {
 
     for entry in statuses.iter() {
         let status = entry.status();
-        if status.contains(git2::Status::WT_MODIFIED)
-            || status.contains(git2::Status::INDEX_MODIFIED)
-            || status.contains(git2::Status::WT_DELETED)
-            || status.contains(git2::Status::INDEX_DELETED)
-            || status.contains(git2::Status::WT_RENAMED)
-            || status.contains(git2::Status::INDEX_RENAMED)
-            || status.contains(git2::Status::WT_TYPECHANGE)
-            || status.contains(git2::Status::INDEX_TYPECHANGE)
+        if status.is_wt_modified()
+            || status.is_index_modified()
+            || status.is_wt_deleted()
+            || status.is_index_deleted()
+            || status.is_wt_renamed()
+            || status.is_index_renamed()
+            || status.is_wt_typechange()
+            || status.is_index_typechange()
         {
             modified += 1;
         }
-        if status.contains(git2::Status::WT_NEW) {
+        if status.is_wt_new() {
             untracked += 1;
         }
     }
 
-    let is_dirty = modified > 0 || untracked > 0;
-
-    (is_dirty, modified, untracked)
+    (modified, untracked)
 }
 
 fn get_remote_url(repo: &Repository) -> Option<String> {

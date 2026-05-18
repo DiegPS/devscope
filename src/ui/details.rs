@@ -129,18 +129,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             theme,
         ));
 
-        let dirty_str = if git.is_dirty {
-            format!(
+        let dirty_str = match git.dirty_status {
+            crate::project::DirtyStatus::Dirty => format!(
                 "{} mod, {} untracked",
-                git.modified_count, git.untracked_count
-            )
-        } else {
-            "clean".to_string()
+                git.modified_count.unwrap_or(0),
+                git.untracked_count.unwrap_or(0)
+            ),
+            crate::project::DirtyStatus::Checking => "checking\u{2807}".to_string(),
+            crate::project::DirtyStatus::Error => "error".to_string(),
+            crate::project::DirtyStatus::Clean => "clean".to_string(),
+            _ => "\u{2026}".to_string(),
         };
-        let dirty_style = if git.is_dirty {
-            theme.dirty
-        } else {
-            theme.clean
+        let dirty_style = match git.dirty_status {
+            crate::project::DirtyStatus::Dirty => theme.dirty,
+            crate::project::DirtyStatus::Error => theme.dim,
+            crate::project::DirtyStatus::Clean => theme.clean,
+            _ => theme.dim,
         };
         lines.push(Line::from(vec![
             Span::styled(pad_label("Dirty"), theme.dim),
