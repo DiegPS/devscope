@@ -173,7 +173,7 @@ pub fn detect_stack(project_path: &Path) -> Vec<String> {
     if project_path.join("docker-compose.yml").exists()
         || project_path.join("docker-compose.yaml").exists()
     {
-        if !stack.contains(&"Docker".to_string()) {
+        if !stack_contains(&stack, "Docker") {
             stack.push("Docker".to_string());
         }
         stack.push("Compose".to_string());
@@ -226,7 +226,7 @@ pub fn detect_stack(project_path: &Path) -> Vec<String> {
     if project_path.join("build.gradle.kts").exists() {
         if let Ok(content) = std::fs::read_to_string(project_path.join("build.gradle.kts")) {
             if (content.contains("kotlin") || content.contains("org.jetbrains.kotlin"))
-                && !stack.contains(&"Kotlin".to_string())
+                && !stack_contains(&stack, "Kotlin")
             {
                 stack.push("Kotlin".to_string());
             }
@@ -239,7 +239,7 @@ pub fn detect_stack(project_path: &Path) -> Vec<String> {
         stack.push("CMake".to_string());
     }
     if project_path.join("Makefile").exists()
-        && !stack.contains(&"C/C++".to_string())
+        && !stack_contains(&stack, "C/C++")
         && (project_path.join("main.c").exists()
             || project_path.join("main.cpp").exists()
             || project_path.join("src").join("main.c").exists()
@@ -282,6 +282,10 @@ pub fn detect_stack(project_path: &Path) -> Vec<String> {
     }
 
     stack
+}
+
+fn stack_contains(stack: &[String], needle: &str) -> bool {
+    stack.iter().any(|entry| entry == needle)
 }
 
 /// Detect the package manager used by the project.

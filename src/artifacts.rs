@@ -6,9 +6,9 @@ pub fn detect_artifacts(project_path: &Path, stack: &[String]) -> Vec<ProjectArt
     let mut artifacts = Vec::new();
 
     let is_flutter = stack.iter().any(|s| s.contains("Flutter"));
-    let is_rust = stack.contains(&"Rust".to_string());
-    let is_tauri = stack.contains(&"Tauri".to_string());
-    let is_node = stack.contains(&"Node".to_string());
+    let is_rust = stack_contains(stack, "Rust");
+    let is_tauri = stack_contains(stack, "Tauri");
+    let is_node = stack_contains(stack, "Node");
 
     if is_flutter {
         detect_flutter_artifacts(project_path, &mut artifacts);
@@ -195,4 +195,8 @@ fn detect_node_artifacts(project_path: &Path, artifacts: &mut Vec<ProjectArtifac
         project_path.join("out"),
         ArtifactKind::Folder,
     ));
+}
+
+fn stack_contains(stack: &[String], needle: &str) -> bool {
+    stack.iter().any(|entry| entry == needle)
 }

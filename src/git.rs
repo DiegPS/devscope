@@ -10,7 +10,7 @@ pub fn get_git_info_fast(repo_path: &Path) -> Result<GitInfo> {
     let repo = Repository::open(repo_path)?;
 
     let branch = get_current_branch(&repo);
-    let (last_hash, last_message, last_date) = get_last_commit_info(&repo);
+    let (last_hash, last_message, last_date, last_timestamp) = get_last_commit_info(&repo);
     let remote_url = get_remote_url(&repo);
 
     let upstream = get_upstream_branch(&repo);
@@ -24,6 +24,7 @@ pub fn get_git_info_fast(repo_path: &Path) -> Result<GitInfo> {
         last_commit_hash: last_hash,
         last_commit_message: last_message,
         last_commit_date: last_date,
+        last_commit_timestamp: last_timestamp,
         dirty_status: DirtyStatus::Unknown,
         modified_count: None,
         untracked_count: None,
@@ -96,15 +97,15 @@ fn get_ahead_behind(
     }
 }
 
-fn get_last_commit_info(repo: &Repository) -> (String, String, String) {
+fn get_last_commit_info(repo: &Repository) -> (String, String, String, Option<i64>) {
     let head = match repo.head() {
         Ok(head) => head,
-        Err(_) => return ("none".to_string(), "no commits".to_string(), String::new()),
+        Err(_) => return ("none".to_string(), "no commits".to_string(), String::new(), None),
     };
 
     let commit = match head.peel_to_commit() {
         Ok(commit) => commit,
-        Err(_) => return ("none".to_string(), "no commits".to_string(), String::new()),
+        Err(_) => return ("none".to_string(), "no commits".to_string(), String::new(), None),
     };
 
     let hash = commit.id().to_string().chars().take(7).collect::<String>();
@@ -122,7 +123,7 @@ fn get_last_commit_info(repo: &Repository) -> (String, String, String) {
         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default();
 
-    (hash, message, date)
+    (hash, message, date, Some(timestamp))
 }
 
 fn get_working_tree_status(repo: &Repository) -> (usize, usize) {

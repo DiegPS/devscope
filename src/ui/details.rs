@@ -216,16 +216,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
     lines.push(aligned_line(
         "Last active",
-        &project.activity.relative_time,
+        &project.activity.relative_time(),
         theme,
     ));
 
     let git_date = project
         .activity
-        .last_git_activity
-        .as_deref()
-        .unwrap_or("none");
-    lines.push(aligned_line("Git date", git_date, theme));
+        .last_git_activity_display()
+        .unwrap_or_else(|| "none".to_string());
+    lines.push(aligned_line("Git date", &git_date, theme));
 
     lines.push(line_separator(inner_w, theme));
 

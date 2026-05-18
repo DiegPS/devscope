@@ -116,7 +116,7 @@ impl FilterField {
 }
 
 struct HydrationResult {
-    project_id: String,
+    project_index: usize,
     dirty_status: DirtyStatus,
     modified_count: Option<usize>,
     untracked_count: Option<usize>,
@@ -275,12 +275,12 @@ impl App {
             FilterField::Paused => project.status == ProjectStatus::Paused,
             FilterField::Archived => project.status == ProjectStatus::Archived,
             FilterField::Flutter => project.stack.iter().any(|s| s.contains("Flutter")),
-            FilterField::Rust => project.stack.contains(&"Rust".to_string()),
-            FilterField::Node => project.stack.contains(&"Node".to_string()),
-            FilterField::Python => project.stack.contains(&"Python".to_string()),
-            FilterField::Go => project.stack.contains(&"Go".to_string()),
-            FilterField::Docker => project.stack.contains(&"Docker".to_string()),
-            FilterField::Windows => project.stack.contains(&"Windows".to_string()),
+            FilterField::Rust => stack_contains(&project.stack, "Rust"),
+            FilterField::Node => stack_contains(&project.stack, "Node"),
+            FilterField::Python => stack_contains(&project.stack, "Python"),
+            FilterField::Go => stack_contains(&project.stack, "Go"),
+            FilterField::Docker => stack_contains(&project.stack, "Docker"),
+            FilterField::Windows => stack_contains(&project.stack, "Windows"),
             FilterField::WithNotes => project.note.is_some(),
         }
     }
@@ -417,22 +417,22 @@ impl App {
         let gen = self.hydration_generation;
 
         // Collect paths for all git repos; apply cache hits immediately
-        let mut jobs: Vec<(String, PathBuf)> = Vec::new();
+        let mut jobs: Vec<(usize, PathBuf)> = Vec::new();
 
         // Collect indices+paths first to avoid borrow conflicts
-        let work: Vec<(usize, String, PathBuf)> = self
+        let work: Vec<(usize, PathBuf)> = self
             .projects
             .iter()
             .enumerate()
             .filter(|(_, p)| p.git.is_some())
-            .map(|(i, p)| (i, p.path.to_string_lossy().to_string(), p.path.clone()))
+            .map(|(i, p)| (i, p.path.clone()))
             .collect();
 
-        for (i, path_str, path) in work {
+        for (i, path) in work {
             if let Some(ref mut git) = self.projects[i].git {
                 git.dirty_status = DirtyStatus::Checking;
             }
-            jobs.push((path_str, path));
+            jobs.push((i, path));
         }
 
         if jobs.is_empty() {
@@ -443,7 +443,7 @@ impl App {
 
         std::thread::spawn(move || {
             use rayon::prelude::*;
-            jobs.par_iter().for_each(|(id, path)| {
+            jobs.par_iter().for_each(|(project_index, path)| {
                 let (status, modified, untracked) =
                     crate::git::get_git_status(path).unwrap_or((
                         DirtyStatus::Error,
@@ -451,7 +451,7 @@ impl App {
                         None,
                     ));
                 let _ = result_tx.send(HydrationResult {
-                    project_id: id.clone(),
+                    project_index: *project_index,
                     dirty_status: status,
                     modified_count: modified,
                     untracked_count: untracked,
@@ -478,11 +478,7 @@ impl App {
                         continue;
                     }
 
-                    if let Some(project) = self
-                        .projects
-                        .iter_mut()
-                        .find(|p| p.id == result.project_id)
-                    {
+                    if let Some(project) = self.projects.get_mut(result.project_index) {
                         if let Some(ref mut git) = project.git {
                             git.dirty_status = result.dirty_status;
                             git.modified_count = result.modified_count;
@@ -514,4 +510,8 @@ impl App {
         self.selected_project()
             .map(|p| p.path.to_string_lossy().to_string())
     }
+}
+
+fn stack_contains(stack: &[String], needle: &str) -> bool {
+    stack.iter().any(|entry| entry == needle)
 }

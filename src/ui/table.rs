@@ -118,7 +118,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             let row = Row::new(vec![name_cell, stack_cell, git_cell, health_cell]).style(row_style);
             rows.push(row);
         } else {
-            let activity = project.activity.relative_time.clone();
+            let activity = project.activity.relative_time();
             let note = project
                 .note
                 .as_deref()

@@ -76,7 +76,7 @@ fn cmd_scan() -> Result<()> {
     for project in &result.projects {
         let stack = project.stack.join(", ");
         let status = project.status.as_str();
-        let activity = &project.activity.relative_time;
+        let activity = project.activity.relative_time();
         let git_info = match &project.git {
             Some(g) => {
                 if g.dirty_status == crate::project::DirtyStatus::Dirty {
@@ -111,7 +111,7 @@ fn cmd_list(json_output: bool) -> Result<()> {
             let stack = project.stack.join(", ");
             let path = project.path.display();
             let status = project.status.as_str();
-            let activity = &project.activity.relative_time;
+            let activity = project.activity.relative_time();
 
             println!(
                 "{} [{}] ({}) {} - {}",

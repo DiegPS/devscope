@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use anyhow::Result;
+use ignore::WalkBuilder;
 use rayon::prelude::*;
 
 use crate::config::{expand_tilde, normalize_path, Config};
@@ -166,7 +167,7 @@ fn scan_single_root(
     }
 
     // Walk subdirectories
-    let subdirs = collect_subdirs(root, config.max_depth, visited)?;
+    let subdirs = collect_subdirs(root, config.max_depth, visited);
     let new_projects: Vec<Project> = subdirs
         .par_iter()
         .filter_map(|path| analyze_project(path, config))
@@ -176,69 +177,85 @@ fn scan_single_root(
     Ok(projects)
 }
 
-fn collect_subdirs(
-    root: &Path,
-    max_depth: usize,
-    visited: &mut HashSet<PathBuf>,
-) -> Result<Vec<PathBuf>> {
-    let mut dirs = Vec::new();
-    collect_subdirs_recursive(root, 0, max_depth, visited, &mut dirs);
-    Ok(dirs)
-}
+fn collect_subdirs(root: &Path, max_depth: usize, visited: &mut HashSet<PathBuf>) -> Vec<PathBuf> {
+    let root = root.to_path_buf();
+    let visited_snapshot = visited.clone();
+    let discovered = Arc::new(Mutex::new(HashSet::new()));
+    let output = Arc::new(Mutex::new(Vec::new()));
 
-fn collect_subdirs_recursive(
-    dir: &Path,
-    current_depth: usize,
-    max_depth: usize,
-    visited: &mut HashSet<PathBuf>,
-    output: &mut Vec<PathBuf>,
-) {
-    if current_depth > max_depth {
-        return;
-    }
+    let mut builder = WalkBuilder::new(&root);
+    builder
+        .max_depth(Some(max_depth.saturating_add(1)))
+        .hidden(false)
+        .git_ignore(false)
+        .git_global(false)
+        .git_exclude(false)
+        .follow_links(false);
 
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return,
-    };
+    builder.filter_entry({
+        let root = root.clone();
+        let discovered = Arc::clone(&discovered);
+        let output = Arc::clone(&output);
+        move |entry| {
+        if !entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            return true;
+        }
 
-    for entry in entries.flatten() {
         let path = entry.path();
-
-        if !path.is_dir() {
-            continue;
+        if path == root {
+            return true;
         }
 
         let name = path
             .file_name()
-            .map(|n| n.to_string_lossy().to_string())
+            .map(|n| n.to_string_lossy())
             .unwrap_or_default();
 
-        // Skip hidden directories unless configured
         if name.starts_with('.') && name != ".git" {
-            continue;
+            return false;
         }
 
-        // Skip known heavy directories
-        if SKIP_DIRS.contains(&name.as_str()) {
-            continue;
+        if SKIP_DIRS.contains(&name.as_ref()) {
+            return false;
         }
 
-        if visited.contains(&path) {
-            continue;
+        if visited_snapshot.contains(path)
+            || discovered
+                .lock()
+                .expect("project-discovery mutex poisoned")
+                .contains(path)
+        {
+            return false;
         }
 
-        // Check if this is a project
-        if is_project(&path) {
-            visited.insert(path.clone());
-            output.push(path.clone());
-            // Don't recurse deeper into detected projects (except for monorepo support TODO)
-            continue;
+        if is_project(path) {
+            let path_buf = path.to_path_buf();
+            discovered
+                .lock()
+                .expect("project-discovery mutex poisoned")
+                .insert(path_buf.clone());
+            output
+                .lock()
+                .expect("project-output mutex poisoned")
+                .push(path_buf);
+            return false;
         }
 
-        // Recurse into non-project directories
-        collect_subdirs_recursive(&path, current_depth + 1, max_depth, visited, output);
+        true
+    }});
+
+    for entry in builder.build() {
+        if entry.is_err() {
+            continue;
+        }
     }
+
+    let dirs = output
+        .lock()
+        .expect("project-output mutex poisoned")
+        .clone();
+    visited.extend(dirs.iter().cloned());
+    dirs
 }
 
 fn project_markers_set() -> &'static HashSet<&'static str> {
@@ -362,46 +379,26 @@ fn hydrate_project_git_status(project: &mut Project) {
 /// Calculate activity information for a project.
 fn calculate_activity(path: &Path, git_info: &Option<crate::project::GitInfo>) -> ActivityInfo {
     // Find the most recent modification time of relevant files
-    let last_modified = find_last_modified(path);
+    let last_modified_ts = find_last_modified(path);
 
     // Use git activity if available
-    let last_git_activity = git_info
-        .as_ref()
-        .map(|g| g.last_commit_date.clone())
-        .filter(|d| !d.is_empty());
-
-    // Determine the most recent activity
-    let most_recent = match (&last_modified, &last_git_activity) {
-        (Some(local), Some(git)) => {
-            if local >= git {
-                local.clone()
-            } else {
-                git.clone()
-            }
-        }
-        (Some(local), None) => local.clone(),
-        (None, Some(git)) => git.clone(),
-        (None, None) => String::new(),
+    let last_git_activity_ts = git_info.as_ref().and_then(|g| g.last_commit_timestamp);
+    let timestamp = match (last_modified_ts, last_git_activity_ts) {
+        (Some(local), Some(git)) => Some(local.max(git)),
+        (Some(local), None) => Some(local),
+        (None, Some(git)) => Some(git),
+        (None, None) => None,
     };
-
-    let relative_time = if most_recent.is_empty() {
-        "unknown".to_string()
-    } else {
-        calculate_relative_time(&most_recent)
-    };
-
-    let timestamp = parse_date_to_timestamp(&most_recent);
 
     ActivityInfo {
-        last_modified: last_modified.filter(|_| false), // Don't expose raw in MVP
-        last_git_activity,
-        relative_time,
+        last_modified_ts,
+        last_git_activity_ts,
         timestamp,
     }
 }
 
 /// Find the most recent modification time of relevant files in a project.
-fn find_last_modified(path: &Path) -> Option<String> {
+fn find_last_modified(path: &Path) -> Option<i64> {
     let mut latest: Option<std::time::SystemTime> = None;
 
     let relevant_files = [
@@ -452,52 +449,7 @@ fn find_last_modified(path: &Path) -> Option<String> {
         }
     }
 
-    latest.map(|t| {
-        chrono::DateTime::<chrono::Utc>::from(t)
-            .format("%Y-%m-%d %H:%M")
-            .to_string()
-    })
-}
-
-/// Calculate a human-readable relative time string.
-fn calculate_relative_time(date_str: &str) -> String {
-    let now = chrono::Utc::now();
-
-    // Try parsing common date formats
-    let parsed = chrono::NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M")
-        .ok()
-        .map(|naive| {
-            chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(naive, chrono::Utc)
-        });
-
-    let Some(dt) = parsed else {
-        return "unknown".to_string();
-    };
-
-    let duration = now.signed_duration_since(dt);
-
-    if duration.num_minutes() < 1 {
-        return "now".to_string();
-    }
-    if duration.num_minutes() < 60 {
-        return format!("{}m", duration.num_minutes());
-    }
-    if duration.num_hours() < 24 {
-        return format!("{}h", duration.num_hours());
-    }
-    if duration.num_days() < 30 {
-        return format!("{}d", duration.num_days());
-    }
-    if duration.num_days() < 365 {
-        return format!("{}mo", duration.num_days() / 30);
-    }
-    format!("{}y", duration.num_days() / 365)
-}
-
-fn parse_date_to_timestamp(date_str: &str) -> Option<i64> {
-    chrono::NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M")
-        .ok()
-        .map(|naive| naive.and_utc().timestamp())
+    latest.and_then(system_time_to_timestamp)
 }
 
 /// Determine project status based on activity.
@@ -580,9 +532,8 @@ mod tests {
             scripts: Vec::new(),
             git: Some(git),
             activity: ActivityInfo {
-                last_modified: None,
-                last_git_activity: None,
-                relative_time: "now".to_string(),
+                last_modified_ts: None,
+                last_git_activity_ts: None,
                 timestamp: Some(chrono::Utc::now().timestamp()),
             },
             status: ProjectStatus::Active,
@@ -616,4 +567,10 @@ mod tests {
             HealthLevel::Good | HealthLevel::Warn | HealthLevel::Bad
         ));
     }
+}
+
+fn system_time_to_timestamp(time: std::time::SystemTime) -> Option<i64> {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs() as i64)
 }

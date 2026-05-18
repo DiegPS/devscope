@@ -1,3 +1,4 @@
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -86,6 +87,7 @@ pub struct GitInfo {
     pub last_commit_hash: String,
     pub last_commit_message: String,
     pub last_commit_date: String,
+    pub last_commit_timestamp: Option<i64>,
     pub dirty_status: DirtyStatus,
     pub modified_count: Option<usize>,
     pub untracked_count: Option<usize>,
@@ -100,10 +102,52 @@ pub struct GitInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivityInfo {
-    pub last_modified: Option<String>,
-    pub last_git_activity: Option<String>,
-    pub relative_time: String,
+    pub last_modified_ts: Option<i64>,
+    pub last_git_activity_ts: Option<i64>,
     pub timestamp: Option<i64>,
+}
+
+impl ActivityInfo {
+    pub fn relative_time(&self) -> String {
+        self.timestamp
+            .map(format_relative_time)
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    pub fn last_git_activity_display(&self) -> Option<String> {
+        self.last_git_activity_ts.map(format_timestamp)
+    }
+}
+
+fn format_timestamp(ts: i64) -> String {
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_default()
+}
+
+fn format_relative_time(ts: i64) -> String {
+    let Some(dt) = chrono::DateTime::from_timestamp(ts, 0) else {
+        return "unknown".to_string();
+    };
+
+    let duration = Utc::now().signed_duration_since(dt);
+
+    if duration.num_minutes() < 1 {
+        return "now".to_string();
+    }
+    if duration.num_minutes() < 60 {
+        return format!("{}m", duration.num_minutes());
+    }
+    if duration.num_hours() < 24 {
+        return format!("{}h", duration.num_hours());
+    }
+    if duration.num_days() < 30 {
+        return format!("{}d", duration.num_days());
+    }
+    if duration.num_days() < 365 {
+        return format!("{}mo", duration.num_days() / 30);
+    }
+    format!("{}y", duration.num_days() / 365)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
