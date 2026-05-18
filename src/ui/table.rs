@@ -161,16 +161,23 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     let activity = project.activity.relative_time();
                     let ports = format_ports(project);
                     let ports_width = layout.column_width(4, inner_w).saturating_sub(1);
+                    let stack_width = layout.column_width(1, inner_w).saturating_sub(1);
+                    let note_width = layout.column_width(5, inner_w).saturating_sub(1);
                     let note = project
                         .note
                         .as_deref()
-                        .map(|value| truncate_end(value, layout.note_max))
+                        .map(|value| truncate_end(value, note_width))
                         .unwrap_or_default();
                     let ports_style = if project.ports.is_empty() {
                         theme.dim
                     } else {
                         theme.command
                     };
+                    let stack_cell = Cell::from(Line::from(if is_selected {
+                        vec![Span::styled(truncate_end(&stack_str, stack_width), row_style)]
+                    } else {
+                        colorize_stack(&truncate_end(&stack_str, stack_width), theme.stack)
+                    }));
                     let activity_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&activity, layout.activity_max),
                         if is_selected { row_style } else { theme.dim },

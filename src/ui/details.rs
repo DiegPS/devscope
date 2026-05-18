@@ -44,30 +44,35 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     } else {
         project.stack.join(", ")
     };
+    let value_width = inner_w.saturating_sub(label_width + 2);
 
     lines.push(aligned_line(
         "Path",
-        &truncate_middle(&path_str, inner_w.saturating_sub(label_width + 2)),
+        &truncate_middle(&path_str, value_width),
         label_width,
+        value_width,
         theme,
     ));
     lines.push(aligned_line(
         "Folder",
-        &truncate_end(folder, inner_w.saturating_sub(label_width + 2)),
+        &truncate_end(folder, value_width),
         label_width,
+        value_width,
         theme,
     ));
-    lines.push(aligned_line("Stack", &stack, label_width, theme));
+    lines.push(aligned_line("Stack", &stack, label_width, value_width, theme));
     lines.push(aligned_line(
         "Manager",
         project.manager.as_deref().unwrap_or("none"),
         label_width,
+        value_width,
         theme,
     ));
     lines.push(aligned_line(
         "Last active",
         &project.activity.relative_time(),
         label_width,
+        value_width,
         theme,
     ));
     lines.push(aligned_line(
@@ -77,12 +82,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             .last_git_activity_display()
             .unwrap_or_else(|| "none".to_string()),
         label_width,
+        value_width,
         theme,
     ));
     lines.push(aligned_line(
         "Note",
         project.note.as_deref().unwrap_or("none"),
         label_width,
+        value_width,
         theme,
     ));
 
@@ -148,8 +155,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     if let Some(git) = &project.git {
         lines.push(aligned_line(
             "Branch",
-            &truncate_end(&git.branch, inner_w.saturating_sub(label_width + 2)),
+            &truncate_end(&git.branch, value_width),
             label_width,
+            value_width,
             theme,
         ));
 
@@ -188,13 +196,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 )
             )
         };
-        lines.push(aligned_line("Commit", &commit_text, label_width, theme));
+        lines.push(aligned_line("Commit", &commit_text, label_width, value_width, theme));
 
         let remote = git.remote_url.as_deref().unwrap_or("none");
         lines.push(aligned_line(
             "Remote",
-            &truncate_middle(remote, inner_w.saturating_sub(label_width + 2)),
+            &truncate_middle(remote, value_width),
             label_width,
+            value_width,
             theme,
         ));
         if git.has_remote {
@@ -202,6 +211,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 "Upstream",
                 git.upstream.as_deref().unwrap_or("none"),
                 label_width,
+                value_width,
                 theme,
             ));
         }
@@ -373,7 +383,13 @@ fn push_section(lines: &mut Vec<Line<'static>>, title: &str, theme: &Theme) {
     )));
 }
 
-fn aligned_line(label: &str, value: &str, label_width: usize, theme: &Theme) -> Line<'static> {
+fn aligned_line(
+    label: &str,
+    value: &str,
+    label_width: usize,
+    value_width: usize,
+    theme: &Theme,
+) -> Line<'static> {
     let value_style = if value == "none" || value == "not available" || value == "unknown" {
         theme.dim
     } else {
@@ -381,7 +397,7 @@ fn aligned_line(label: &str, value: &str, label_width: usize, theme: &Theme) -> 
     };
     Line::from(vec![
         Span::styled(pad_label(label, label_width), theme.dim),
-        Span::styled(truncate_end(value, 200), value_style),
+        Span::styled(truncate_end(value, value_width), value_style),
     ])
 }
 
@@ -402,7 +418,11 @@ fn detail_label_width(inner_w: usize) -> usize {
 }
 
 fn section_separator(inner_w: usize, theme: &Theme) -> Line<'static> {
-    Line::from(Span::styled("\u{2500}".repeat(inner_w), theme.border))
+    let separator_width = inner_w.saturating_add(2);
+    Line::from(Span::styled(
+        "\u{2500}".repeat(separator_width),
+        theme.border,
+    ))
 }
 
 fn health_bar(score: u8, width: usize) -> String {
