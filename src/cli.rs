@@ -4,7 +4,9 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "devscope",
     version,
-    about = "Fast local project scanner and TUI dashboard"
+    about = "Fast local project scanner and TUI dashboard",
+    long_about = "Fast local project scanner and TUI dashboard.\n\nRun without a subcommand to launch the interactive TUI.",
+    after_help = "Examples:\n  devscope\n  devscope scan\n  devscope list --json\n  devscope add-root C:\\Users\\me\\projects\n  devscope note devscope \"Needs perf review\"\n  devscope status devscope active\n  devscope discover --apply"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -18,7 +20,7 @@ pub enum Commands {
 
     /// List projects in text or JSON format
     List {
-        /// Output as JSON
+        /// Output projects as JSON
         #[arg(long)]
         json: bool,
     },
@@ -40,7 +42,7 @@ pub enum Commands {
 
     /// Add or update a note for a project
     Note {
-        /// Project path or name
+        /// Project identifier: exact name, partial name, or path
         project: String,
         /// Note text
         text: String,
@@ -48,28 +50,28 @@ pub enum Commands {
 
     /// Set project status
     Status {
-        /// Project path or name
+        /// Project identifier: exact name, partial name, or path
         project: String,
-        /// New status: active, paused, stale, archived
+        /// New status: active, paused, stale, or archived
         new_status: String,
     },
 
-    /// Show path to config file
+    /// Show the path to config.toml
     Config {
-        /// Open config in editor
+        /// Print the config path with a note to edit it manually
         #[arg(long)]
         edit: bool,
     },
 
-    /// Open project folder (prints path in MVP)
+    /// Resolve a project and print its path
     Open {
-        /// Project path or name
+        /// Project identifier: exact name, partial name, or path
         project: String,
     },
 
     /// Discover possible project roots automatically
     Discover {
-        /// Apply discovered roots to config
+        /// Add discovered roots to config.toml
         #[arg(long)]
         apply: bool,
     },
