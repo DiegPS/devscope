@@ -126,13 +126,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                             .style(row_style)
                     }
                 }
-                LayoutKind::CompactWide => {
+                LayoutKind::CompactMedium => {
                     let activity = project.activity.relative_time();
-                    let note = project
-                        .note
-                        .as_deref()
-                        .map(|value| truncate_end(value, layout.note_max))
-                        .unwrap_or_default();
+                    let ports = format_ports(project);
+                    let ports_width = layout.column_width(4, inner_w).saturating_sub(1);
+                    let ports_style = if project.ports.is_empty() {
+                        theme.dim
+                    } else {
+                        theme.command
+                    };
                     let activity_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&activity, layout.activity_max),
                         if is_selected { row_style } else { theme.dim },
@@ -140,6 +142,46 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     let git_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&git_label, layout.git_max),
                         if is_selected { row_style } else { git_style },
+                    )));
+                    let ports_cell = Cell::from(Line::from(Span::styled(
+                        truncate_end(&ports, ports_width),
+                        if is_selected { row_style } else { ports_style },
+                    )));
+                    Row::new(vec![
+                        name_cell,
+                        stack_cell,
+                        activity_cell,
+                        git_cell,
+                        ports_cell,
+                        health_cell,
+                    ])
+                    .style(row_style)
+                }
+                LayoutKind::CompactWide => {
+                    let activity = project.activity.relative_time();
+                    let ports = format_ports(project);
+                    let ports_width = layout.column_width(4, inner_w).saturating_sub(1);
+                    let note = project
+                        .note
+                        .as_deref()
+                        .map(|value| truncate_end(value, layout.note_max))
+                        .unwrap_or_default();
+                    let ports_style = if project.ports.is_empty() {
+                        theme.dim
+                    } else {
+                        theme.command
+                    };
+                    let activity_cell = Cell::from(Line::from(Span::styled(
+                        truncate_end(&activity, layout.activity_max),
+                        if is_selected { row_style } else { theme.dim },
+                    )));
+                    let git_cell = Cell::from(Line::from(Span::styled(
+                        truncate_end(&git_label, layout.git_max),
+                        if is_selected { row_style } else { git_style },
+                    )));
+                    let ports_cell = Cell::from(Line::from(Span::styled(
+                        truncate_end(&ports, ports_width),
+                        if is_selected { row_style } else { ports_style },
                     )));
                     let note_cell = Cell::from(Line::from(Span::styled(
                         note,
@@ -150,6 +192,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                         stack_cell,
                         activity_cell,
                         git_cell,
+                        ports_cell,
                         note_cell,
                         health_cell,
                     ])
@@ -232,6 +275,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 #[derive(Clone, Copy)]
 enum LayoutKind {
     CompactNarrow,
+    CompactMedium,
     CompactWide,
     DetailedMedium,
     DetailedWide,
@@ -266,6 +310,21 @@ impl TableLayout {
         let spacing = self.widths.len().saturating_sub(1);
         inner_w.saturating_sub(fixed + spacing).max(10)
     }
+
+    fn column_width(&self, index: usize, inner_w: usize) -> usize {
+        let Some(constraint) = self.widths.get(index) else {
+            return 0;
+        };
+
+        match constraint {
+            Constraint::Length(value) => *value as usize,
+            Constraint::Percentage(value) => inner_w * (*value as usize) / 100,
+            Constraint::Min(value) => *value as usize,
+            Constraint::Max(value) => *value as usize,
+            Constraint::Fill(_) => inner_w,
+            Constraint::Ratio(num, den) => inner_w * (*num as usize) / (*den as usize),
+        }
+    }
 }
 
 fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
@@ -290,16 +349,37 @@ fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
             };
         }
 
+        if width < 126 {
+            return TableLayout {
+                kind: LayoutKind::CompactMedium,
+                headers: &["Name", "Stack", "Act", "Git", "Ports", "H"],
+                widths: vec![
+                    Constraint::Percentage(38),
+                    Constraint::Percentage(24),
+                    Constraint::Percentage(8),
+                    Constraint::Percentage(14),
+                    Constraint::Percentage(10),
+                    Constraint::Percentage(6),
+                ],
+                stack_max: 22,
+                activity_max: 6,
+                status_max: 0,
+                git_max: 15,
+                note_max: 0,
+            };
+        }
+
         return TableLayout {
             kind: LayoutKind::CompactWide,
-            headers: &["Name", "Stack", "Act", "Git", "Note", "H"],
+            headers: &["Name", "Stack", "Act", "Git", "Ports", "Note", "H"],
             widths: vec![
-                Constraint::Min(14),
-                Constraint::Length(24),
-                Constraint::Length(6),
-                Constraint::Length(15),
-                Constraint::Length(18),
-                Constraint::Length(3),
+                Constraint::Percentage(28),
+                Constraint::Percentage(21),
+                Constraint::Percentage(7),
+                Constraint::Percentage(13),
+                Constraint::Percentage(9),
+                Constraint::Percentage(17),
+                Constraint::Percentage(5),
             ],
             stack_max: 24,
             activity_max: 6,
@@ -475,4 +555,17 @@ fn colorize_stack(stack: &str, default_style: Style) -> Vec<Span<'static>> {
     }
 
     spans
+}
+
+fn format_ports(project: &crate::project::Project) -> String {
+    if project.ports.is_empty() {
+        return "\u{2014}".to_string();
+    }
+
+    project
+        .ports
+        .iter()
+        .map(|port| port.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
 }

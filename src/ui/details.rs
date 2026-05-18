@@ -402,7 +402,7 @@ fn detail_label_width(inner_w: usize) -> usize {
 }
 
 fn section_separator(inner_w: usize, theme: &Theme) -> Line<'static> {
-    Line::from(Span::styled("\u{2500}".repeat(inner_w.min(64)), theme.border))
+    Line::from(Span::styled("\u{2500}".repeat(inner_w), theme.border))
 }
 
 fn health_bar(score: u8, width: usize) -> String {
