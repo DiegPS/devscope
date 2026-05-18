@@ -51,26 +51,56 @@ fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, them
     use ratatui::text::{Line, Span};
     use ratatui::widgets::Paragraph;
 
+    let dirty_count = app
+        .projects
+        .iter()
+        .filter(|project| {
+            project
+                .git
+                .as_ref()
+                .is_some_and(|git| git.dirty_status == crate::project::DirtyStatus::Dirty)
+        })
+        .count();
+
+    if area.width < 92 {
+        let compact = if let Some(ref msg) = app.status_message {
+            Line::from(vec![
+                Span::styled(" devscope ", theme.title),
+                Span::styled("· ", theme.dim),
+                Span::styled(msg.as_str(), theme.active),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(" devscope ", theme.title),
+                Span::styled(format!("{} ", app.filtered_count()), theme.count),
+                Span::styled("/ ", theme.dim),
+                Span::styled(format!("{} ", app.total_projects), theme.muted),
+                Span::styled("· ", theme.dim),
+                Span::styled(format_scan_time(app.scan_duration_ms), theme.muted),
+            ])
+        };
+        frame.render_widget(Paragraph::new(compact), area);
+        return;
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(45)])
+        .constraints([Constraint::Min(0), Constraint::Length(58)])
         .split(area);
 
     let title = if let Some(ref msg) = app.status_message {
         Line::from(vec![
-            Span::styled(" ", theme.title),
-            Span::styled("devscope", theme.title),
-            Span::styled("  ", theme.dim),
+            Span::styled(" devscope ", theme.title),
+            Span::styled("· ", theme.dim),
             Span::styled(msg.as_str(), theme.active),
         ])
     } else {
         Line::from(vec![
-            Span::styled(" ", theme.title),
-            Span::styled("devscope", theme.title),
-            Span::styled("  ", theme.dim),
+            Span::styled(" devscope ", theme.title),
+            Span::styled("· ", theme.dim),
             Span::styled(format!("{}", app.total_projects), theme.count),
-            Span::styled(" projects", theme.muted),
-            Span::styled("  ", theme.dim),
+            Span::styled(" projects ", theme.muted),
+            Span::styled("· ", theme.dim),
             Span::styled(format_scan_time(app.scan_duration_ms), theme.muted),
         ])
     };
@@ -79,11 +109,16 @@ fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, them
     let info = Line::from(vec![
         Span::styled("filter ", theme.muted),
         Span::styled(app.filter.as_str(), theme.filter),
-        Span::styled("  ", theme.dim),
-        Span::styled(
-            format!("{}/{}", app.filtered_count(), app.total_projects),
-            theme.count,
-        ),
+        Span::styled(" · ", theme.dim),
+        Span::styled("sort ", theme.muted),
+        Span::styled(app.sort.as_str(), theme.footer_key),
+        Span::styled(" · ", theme.dim),
+        Span::styled("view ", theme.muted),
+        Span::styled(app.view_mode.as_str(), theme.footer_hint),
+        Span::styled(" · ", theme.dim),
+        Span::styled(format!("{}/{}", app.filtered_count(), app.total_projects), theme.count),
+        Span::styled(" · ", theme.dim),
+        Span::styled(format!("{} dirty", dirty_count), theme.dirty),
     ]);
     frame.render_widget(
         Paragraph::new(info).alignment(ratatui::layout::Alignment::Right),
@@ -127,7 +162,8 @@ fn render_help_overlay(
         Line::from("    n           Edit note"),
         Line::from("    m           Change status"),
         Line::from("    o           Open / print path"),
-        Line::from("    Enter       Toggle details"),
+        Line::from("    Enter       Record visit"),
+        Line::from("    D           Toggle compact / detailed"),
         Line::from(""),
         Line::from(Span::styled("  General", theme.filter)),
         Line::from("    ?           This help"),

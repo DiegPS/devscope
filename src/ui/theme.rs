@@ -37,47 +37,47 @@ impl Default for Theme {
     fn default() -> Self {
         Self {
             title: Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::Rgb(133, 221, 212))
                 .add_modifier(ratatui::style::Modifier::BOLD),
-            text: Style::default().fg(Color::Gray),
-            dim: Style::default().fg(Color::DarkGray),
-            muted: Style::default().fg(Color::Gray),
+            text: Style::default().fg(Color::Rgb(222, 226, 230)),
+            dim: Style::default().fg(Color::Rgb(107, 114, 128)),
+            muted: Style::default().fg(Color::Rgb(148, 163, 184)),
             header: Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::Rgb(255, 214, 102))
                 .add_modifier(ratatui::style::Modifier::BOLD),
             selected: Style::default()
-                .bg(Color::Blue)
-                .fg(Color::White)
+                .bg(Color::Rgb(33, 61, 72))
+                .fg(Color::Rgb(248, 250, 252))
                 .add_modifier(ratatui::style::Modifier::BOLD),
-            active: Style::default().fg(Color::Green),
-            paused: Style::default().fg(Color::Yellow),
-            stale: Style::default().fg(Color::DarkGray),
-            archived: Style::default().fg(Color::Red),
-            dirty: Style::default().fg(Color::LightRed),
-            clean: Style::default().fg(Color::Green),
-            warning: Style::default().fg(Color::Yellow),
-            filter: Style::default().fg(Color::Magenta),
-            count: Style::default().fg(Color::Cyan),
-            border: Style::default().fg(Color::DarkGray),
-            note: Style::default().fg(Color::Yellow),
-            stack: Style::default().fg(Color::Cyan),
-            footer: Style::default(),
+            active: Style::default().fg(Color::Rgb(122, 222, 122)),
+            paused: Style::default().fg(Color::Rgb(255, 199, 95)),
+            stale: Style::default().fg(Color::Rgb(148, 163, 184)),
+            archived: Style::default().fg(Color::Rgb(255, 117, 117)),
+            dirty: Style::default().fg(Color::Rgb(255, 135, 107)),
+            clean: Style::default().fg(Color::Rgb(122, 222, 122)),
+            warning: Style::default().fg(Color::Rgb(255, 199, 95)),
+            filter: Style::default().fg(Color::Rgb(255, 214, 102)),
+            count: Style::default().fg(Color::Rgb(133, 221, 212)),
+            border: Style::default().fg(Color::Rgb(71, 85, 105)),
+            note: Style::default().fg(Color::Rgb(255, 214, 153)),
+            stack: Style::default().fg(Color::Rgb(144, 205, 244)),
+            footer: Style::default().fg(Color::Rgb(148, 163, 184)),
             footer_key: Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::Rgb(133, 221, 212))
                 .add_modifier(ratatui::style::Modifier::BOLD),
-            footer_hint: Style::default().fg(Color::DarkGray),
-            footer_sep: Style::default().fg(Color::DarkGray),
-            health_good: Style::default().fg(Color::Green),
-            health_warn: Style::default().fg(Color::Yellow),
-            health_bad: Style::default().fg(Color::LightRed),
-            ahead_behind: Style::default().fg(Color::Cyan),
+            footer_hint: Style::default().fg(Color::Rgb(203, 213, 225)),
+            footer_sep: Style::default().fg(Color::Rgb(71, 85, 105)),
+            health_good: Style::default().fg(Color::Rgb(122, 222, 122)),
+            health_warn: Style::default().fg(Color::Rgb(255, 199, 95)),
+            health_bad: Style::default().fg(Color::Rgb(255, 117, 117)),
+            ahead_behind: Style::default().fg(Color::Rgb(133, 221, 212)),
             section_title: Style::default()
-                .fg(Color::Magenta)
+                .fg(Color::Rgb(255, 214, 102))
                 .add_modifier(ratatui::style::Modifier::BOLD),
             table_header: Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::Rgb(160, 231, 224))
                 .add_modifier(ratatui::style::Modifier::BOLD),
-            command: Style::default().fg(Color::Cyan),
+            command: Style::default().fg(Color::Rgb(133, 221, 212)),
         }
     }
 }

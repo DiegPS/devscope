@@ -15,9 +15,23 @@ pub fn create_main_layout(area: Rect) -> Vec<Rect> {
 
 /// Create the horizontal split for content: left table, right details.
 pub fn create_content_layout(area: Rect) -> Vec<Rect> {
+    let use_vertical = area.width < 125;
+
+    let (direction, constraints) = if use_vertical {
+        (
+            Direction::Vertical,
+            vec![Constraint::Percentage(56), Constraint::Percentage(44)],
+        )
+    } else {
+        (
+            Direction::Horizontal,
+            vec![Constraint::Percentage(60), Constraint::Percentage(40)],
+        )
+    };
+
     Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+        .direction(direction)
+        .constraints(constraints)
         .split(area)
         .to_vec()
 }

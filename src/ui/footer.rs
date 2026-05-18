@@ -123,21 +123,32 @@ pub fn render_status_change(frame: &mut Frame, area: Rect, app: &App, theme: &Th
 }
 
 fn build_footer(width: u16, theme: &Theme) -> Line<'static> {
-    let short = width < 90;
+    let compact = width < 72;
+    let medium = width < 110;
     let sep = Span::styled(" \u{00B7} ", theme.footer_sep);
 
-    let pairs: Vec<(&str, &str)> = if short {
+    let pairs: Vec<(&str, &str)> = if compact {
+        vec![
+            ("\u{2191}\u{2193}", "nav"),
+            ("/", "search"),
+            ("D", "view"),
+            ("?", "help"),
+            ("q", "quit"),
+        ]
+    } else if medium {
         vec![
             ("\u{2191}\u{2193}", "nav"),
             ("/", "search"),
             ("f", "filter"),
+            ("s", "sort"),
+            ("r", "reload"),
             ("D", "view"),
-            ("?", "help"),
             ("q", "quit"),
         ]
     } else {
         vec![
             ("\u{2191}\u{2193}", "nav"),
+            ("PgUp/PgDn", "jump"),
             ("/", "search"),
             ("f", "filter"),
             ("s", "sort"),
@@ -147,6 +158,7 @@ fn build_footer(width: u16, theme: &Theme) -> Line<'static> {
             ("o", "open"),
             (",", "config"),
             ("D", "view"),
+            ("Enter", "visit"),
             ("?", "help"),
             ("q", "quit"),
         ]

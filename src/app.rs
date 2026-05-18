@@ -32,6 +32,15 @@ pub enum ViewMode {
     Detailed,
 }
 
+impl ViewMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Detailed => "detailed",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortField {
     Activity,
@@ -44,6 +53,18 @@ pub enum SortField {
 }
 
 impl SortField {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Activity => "activity",
+            Self::Name => "name",
+            Self::Stack => "stack",
+            Self::Status => "status",
+            Self::DirtyFirst => "dirty",
+            Self::Path => "path",
+            Self::Score => "score",
+        }
+    }
+
     pub fn all() -> Vec<Self> {
         vec![
             Self::Activity,
