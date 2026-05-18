@@ -20,14 +20,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
     // Render header
     render_header(frame, vertical[0], app, &theme);
 
-    // Horizontal split for main area: left table, right details
-    let main_area = layout::create_content_layout(vertical[1]);
+    let main_area = layout::create_content_layout(vertical[1], app.view_mode);
 
-    // Render project table
     table::render(frame, main_area[0], app, &theme);
 
-    // Render details panel
-    details::render(frame, main_area[1], app, &theme);
+    if matches!(app.view_mode, crate::app::ViewMode::Detailed) {
+        details::render(frame, main_area[1], app, &theme);
+    }
 
     // Render footer (mode-dependent)
     match app.mode {

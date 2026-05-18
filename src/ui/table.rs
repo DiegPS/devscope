@@ -102,12 +102,58 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             )));
 
             let row = match layout.kind {
-                LayoutKind::Compact => {
+                LayoutKind::CompactNarrow => {
                     let git_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&git_label, layout.git_max),
                         if is_selected { row_style } else { git_style },
                     )));
-                    Row::new(vec![name_cell, stack_cell, git_cell, health_cell]).style(row_style)
+                    if layout.activity_max > 0 {
+                        let activity = project.activity.relative_time();
+                        let activity_cell = Cell::from(Line::from(Span::styled(
+                            truncate_end(&activity, layout.activity_max),
+                            if is_selected { row_style } else { theme.dim },
+                        )));
+                        Row::new(vec![
+                            name_cell,
+                            stack_cell,
+                            activity_cell,
+                            git_cell,
+                            health_cell,
+                        ])
+                        .style(row_style)
+                    } else {
+                        Row::new(vec![name_cell, stack_cell, git_cell, health_cell])
+                            .style(row_style)
+                    }
+                }
+                LayoutKind::CompactWide => {
+                    let activity = project.activity.relative_time();
+                    let note = project
+                        .note
+                        .as_deref()
+                        .map(|value| truncate_end(value, layout.note_max))
+                        .unwrap_or_default();
+                    let activity_cell = Cell::from(Line::from(Span::styled(
+                        truncate_end(&activity, layout.activity_max),
+                        if is_selected { row_style } else { theme.dim },
+                    )));
+                    let git_cell = Cell::from(Line::from(Span::styled(
+                        truncate_end(&git_label, layout.git_max),
+                        if is_selected { row_style } else { git_style },
+                    )));
+                    let note_cell = Cell::from(Line::from(Span::styled(
+                        note,
+                        if is_selected { row_style } else { theme.note },
+                    )));
+                    Row::new(vec![
+                        name_cell,
+                        stack_cell,
+                        activity_cell,
+                        git_cell,
+                        note_cell,
+                        health_cell,
+                    ])
+                    .style(row_style)
                 }
                 LayoutKind::DetailedMedium => {
                     let activity = project.activity.relative_time();
@@ -185,7 +231,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
 #[derive(Clone, Copy)]
 enum LayoutKind {
-    Compact,
+    CompactNarrow,
+    CompactWide,
     DetailedMedium,
     DetailedWide,
 }
@@ -223,9 +270,48 @@ impl TableLayout {
 
 fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
     let width = area.width;
-    if matches!(view_mode, ViewMode::Compact) || width < 78 {
+    if matches!(view_mode, ViewMode::Compact) {
+        if width < 96 {
+            return TableLayout {
+                kind: LayoutKind::CompactNarrow,
+                headers: &["Name", "Stack", "Act", "Git", "H"],
+                widths: vec![
+                    Constraint::Percentage(38),
+                    Constraint::Percentage(26),
+                    Constraint::Percentage(8),
+                    Constraint::Percentage(20),
+                    Constraint::Percentage(8),
+                ],
+                stack_max: 22,
+                activity_max: 6,
+                status_max: 0,
+                git_max: 16,
+                note_max: 0,
+            };
+        }
+
         return TableLayout {
-            kind: LayoutKind::Compact,
+            kind: LayoutKind::CompactWide,
+            headers: &["Name", "Stack", "Act", "Git", "Note", "H"],
+            widths: vec![
+                Constraint::Min(14),
+                Constraint::Length(24),
+                Constraint::Length(6),
+                Constraint::Length(15),
+                Constraint::Length(18),
+                Constraint::Length(3),
+            ],
+            stack_max: 24,
+            activity_max: 6,
+            status_max: 0,
+            git_max: 15,
+            note_max: 18,
+        };
+    }
+
+    if width < 78 {
+        return TableLayout {
+            kind: LayoutKind::CompactNarrow,
             headers: &["Name", "Stack", "Git", "H"],
             widths: vec![
                 Constraint::Percentage(43),
