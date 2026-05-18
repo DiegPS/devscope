@@ -2,12 +2,13 @@ use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::App;
 use crate::ui::theme::Theme;
 
 pub fn render_normal(frame: &mut Frame, area: Rect, _app: &App, theme: &Theme) {
-    let line = build_footer(area.width, theme);
+    let line = build_footer(area.width, _app, theme);
     let footer = Paragraph::new(line).style(theme.footer);
     frame.render_widget(footer, area);
 }
@@ -122,34 +123,16 @@ pub fn render_status_change(frame: &mut Frame, area: Rect, app: &App, theme: &Th
     frame.render_widget(footer, area);
 }
 
-fn build_footer(width: u16, theme: &Theme) -> Line<'static> {
-    let compact = width < 72;
-    let medium = width < 110;
-    let sep = Span::styled(" \u{00B7} ", theme.footer_sep);
+fn build_footer(width: u16, app: &App, theme: &Theme) -> Line<'static> {
+    let detailed_vertical = matches!(app.view_mode, crate::app::ViewMode::Detailed) && width < 125;
+    let primary = vec![("\u{2191}\u{2193}", "nav"), ("/", "search")];
+    let tail = vec![("D", "view"), ("?", "help"), ("q", "quit")];
 
-    let pairs: Vec<(&str, &str)> = if compact {
-        vec![
-            ("\u{2191}\u{2193}", "nav"),
-            ("/", "search"),
-            ("D", "view"),
-            ("?", "help"),
-            ("q", "quit"),
-        ]
-    } else if medium {
-        vec![
-            ("\u{2191}\u{2193}", "nav"),
-            ("/", "search"),
-            ("f", "filter"),
-            ("s", "sort"),
-            ("r", "reload"),
-            ("D", "view"),
-            ("q", "quit"),
-        ]
+    let optional: Vec<(&str, &str)> = if width < 110 || detailed_vertical {
+        vec![("f", "filter"), ("s", "sort"), ("r", "reload")]
     } else {
         vec![
-            ("\u{2191}\u{2193}", "nav"),
             ("PgUp/PgDn", "jump"),
-            ("/", "search"),
             ("f", "filter"),
             ("s", "sort"),
             ("n", "note"),
@@ -159,10 +142,28 @@ fn build_footer(width: u16, theme: &Theme) -> Line<'static> {
             (",", "config"),
             ("D", "view"),
             ("Enter", "visit"),
-            ("?", "help"),
-            ("q", "quit"),
         ]
     };
+
+    let mut pairs = primary.clone();
+    let mut selected_optional: Vec<(&str, &str)> = Vec::new();
+    let max_width = width as usize;
+
+    for candidate in optional {
+        let mut trial = primary.clone();
+        trial.extend(selected_optional.iter().copied());
+        trial.push(candidate);
+        trial.extend(tail.iter().copied());
+
+        if footer_width(&trial) <= max_width {
+            selected_optional.push(candidate);
+        }
+    }
+
+    pairs.extend(selected_optional);
+    pairs.extend(tail);
+
+    let sep = Span::styled(" \u{00B7} ", theme.footer_sep);
 
     let mut spans: Vec<Span> = Vec::new();
     for (i, (key, label)) in pairs.iter().enumerate() {
@@ -177,4 +178,17 @@ fn build_footer(width: u16, theme: &Theme) -> Line<'static> {
     line_spans.extend(spans);
 
     Line::from(line_spans)
+}
+
+fn footer_width(pairs: &[(&str, &str)]) -> usize {
+    let base_padding = 2usize;
+    let sep_width = " \u{00B7} ".width();
+
+    let content_width: usize = pairs
+        .iter()
+        .map(|(key, label)| key.width() + 1 + label.width())
+        .sum();
+
+    let separators = pairs.len().saturating_sub(1) * sep_width;
+    base_padding + content_width + separators
 }
