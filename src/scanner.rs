@@ -197,52 +197,53 @@ fn collect_subdirs(root: &Path, max_depth: usize, visited: &mut HashSet<PathBuf>
         let discovered = Arc::clone(&discovered);
         let output = Arc::clone(&output);
         move |entry| {
-        if !entry.file_type().is_some_and(|ft| ft.is_dir()) {
-            return true;
+            if !entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                return true;
+            }
+
+            let path = entry.path();
+            if path == root {
+                return true;
+            }
+
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy())
+                .unwrap_or_default();
+
+            if name.starts_with('.') && name != ".git" {
+                return false;
+            }
+
+            if SKIP_DIRS.contains(&name.as_ref()) {
+                return false;
+            }
+
+            if visited_snapshot.contains(path)
+                || discovered
+                    .lock()
+                    .expect("project-discovery mutex poisoned")
+                    .contains(path)
+            {
+                return false;
+            }
+
+            if is_project(path) {
+                let path_buf = path.to_path_buf();
+                discovered
+                    .lock()
+                    .expect("project-discovery mutex poisoned")
+                    .insert(path_buf.clone());
+                output
+                    .lock()
+                    .expect("project-output mutex poisoned")
+                    .push(path_buf);
+                return false;
+            }
+
+            true
         }
-
-        let path = entry.path();
-        if path == root {
-            return true;
-        }
-
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy())
-            .unwrap_or_default();
-
-        if name.starts_with('.') && name != ".git" {
-            return false;
-        }
-
-        if SKIP_DIRS.contains(&name.as_ref()) {
-            return false;
-        }
-
-        if visited_snapshot.contains(path)
-            || discovered
-                .lock()
-                .expect("project-discovery mutex poisoned")
-                .contains(path)
-        {
-            return false;
-        }
-
-        if is_project(path) {
-            let path_buf = path.to_path_buf();
-            discovered
-                .lock()
-                .expect("project-discovery mutex poisoned")
-                .insert(path_buf.clone());
-            output
-                .lock()
-                .expect("project-output mutex poisoned")
-                .push(path_buf);
-            return false;
-        }
-
-        true
-    }});
+    });
 
     for entry in builder.build() {
         if entry.is_err() {
@@ -364,8 +365,8 @@ fn hydrate_project_git_status(project: &mut Project) {
         return;
     }
 
-    let (dirty_status, modified_count, untracked_count) = crate::git::get_git_status(&project.path)
-        .unwrap_or((DirtyStatus::Error, None, None));
+    let (dirty_status, modified_count, untracked_count) =
+        crate::git::get_git_status(&project.path).unwrap_or((DirtyStatus::Error, None, None));
 
     if let Some(git) = project.git.as_mut() {
         git.dirty_status = dirty_status;
@@ -484,6 +485,12 @@ fn determine_status(
     ProjectStatus::Unknown
 }
 
+fn system_time_to_timestamp(time: std::time::SystemTime) -> Option<i64> {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs() as i64)
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -598,10 +605,4 @@ mod tests {
         assert_eq!(determine_status(&stale, &None), ProjectStatus::Stale);
         assert_eq!(determine_status(&archived, &None), ProjectStatus::Archived);
     }
-}
-
-fn system_time_to_timestamp(time: std::time::SystemTime) -> Option<i64> {
-    time.duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .map(|duration| duration.as_secs() as i64)
 }
