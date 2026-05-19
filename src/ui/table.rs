@@ -1,4 +1,4 @@
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table};
@@ -10,8 +10,9 @@ use crate::project::{DirtyStatus, HealthLevel, ProjectStatus};
 use crate::ui::theme::Theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let inner_w = area.width.saturating_sub(2).max(1) as usize;
+    let inner_w = area.width.saturating_sub(2).max(1);
     let layout = resolve_layout(area, app.view_mode);
+    let resolved_widths = layout.resolved_widths(inner_w);
 
     let header = Row::new(layout.headers.iter().map(|label| Cell::from(*label)))
         .style(theme.table_header)
@@ -83,9 +84,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 HealthLevel::Unknown => "\u{2014}",
             };
 
-            let name = truncate_end(&project.name, layout.name_width(inner_w));
+            let name = truncate_end(&project.name, layout.cell_width(&resolved_widths, 0));
             let stack_str = project.stack.join(" + ");
-            let stack = truncate_end(&stack_str, layout.stack_max);
+            let stack = truncate_end(&stack_str, layout.cell_width(&resolved_widths, 1));
 
             let name_cell = Cell::from(Line::from(Span::styled(
                 name,
@@ -104,43 +105,38 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             let row = match layout.kind {
                 LayoutKind::CompactNarrow => {
                     let git_cell = Cell::from(Line::from(Span::styled(
-                        truncate_end(&git_label, layout.git_max),
+                        truncate_end(&git_label, layout.cell_width(&resolved_widths, 3)),
                         if is_selected { row_style } else { git_style },
                     )));
-                    if layout.activity_max > 0 {
-                        let activity = project.activity.relative_time();
-                        let activity_cell = Cell::from(Line::from(Span::styled(
-                            truncate_end(&activity, layout.activity_max),
-                            if is_selected { row_style } else { theme.dim },
-                        )));
-                        Row::new(vec![
-                            name_cell,
-                            stack_cell,
-                            activity_cell,
-                            git_cell,
-                            health_cell,
-                        ])
-                        .style(row_style)
-                    } else {
-                        Row::new(vec![name_cell, stack_cell, git_cell, health_cell])
-                            .style(row_style)
-                    }
+                    let activity = project.activity.relative_time();
+                    let activity_cell = Cell::from(Line::from(Span::styled(
+                        truncate_end(&activity, layout.cell_width(&resolved_widths, 2)),
+                        if is_selected { row_style } else { theme.dim },
+                    )));
+                    Row::new(vec![
+                        name_cell,
+                        stack_cell,
+                        activity_cell,
+                        git_cell,
+                        health_cell,
+                    ])
+                    .style(row_style)
                 }
                 LayoutKind::CompactMedium => {
                     let activity = project.activity.relative_time();
                     let ports = format_ports(project);
-                    let ports_width = layout.column_width(4, inner_w).saturating_sub(1);
+                    let ports_width = layout.cell_width(&resolved_widths, 4);
                     let ports_style = if project.ports.is_empty() {
                         theme.dim
                     } else {
                         theme.command
                     };
                     let activity_cell = Cell::from(Line::from(Span::styled(
-                        truncate_end(&activity, layout.activity_max),
+                        truncate_end(&activity, layout.cell_width(&resolved_widths, 2)),
                         if is_selected { row_style } else { theme.dim },
                     )));
                     let git_cell = Cell::from(Line::from(Span::styled(
-                        truncate_end(&git_label, layout.git_max),
+                        truncate_end(&git_label, layout.cell_width(&resolved_widths, 3)),
                         if is_selected { row_style } else { git_style },
                     )));
                     let ports_cell = Cell::from(Line::from(Span::styled(
@@ -160,9 +156,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 LayoutKind::CompactWide => {
                     let activity = project.activity.relative_time();
                     let ports = format_ports(project);
-                    let ports_width = layout.column_width(4, inner_w).saturating_sub(1);
-                    let stack_width = layout.column_width(1, inner_w).saturating_sub(1);
-                    let note_width = layout.column_width(5, inner_w).saturating_sub(1);
+                    let ports_width = layout.cell_width(&resolved_widths, 4);
+                    let stack_width = layout.cell_width(&resolved_widths, 1);
+                    let note_width = layout.cell_width(&resolved_widths, 5);
                     let note = project
                         .note
                         .as_deref()
@@ -182,11 +178,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                         colorize_stack(&truncate_end(&stack_str, stack_width), theme.stack)
                     }));
                     let activity_cell = Cell::from(Line::from(Span::styled(
-                        truncate_end(&activity, layout.activity_max),
+                        truncate_end(&activity, layout.cell_width(&resolved_widths, 2)),
                         if is_selected { row_style } else { theme.dim },
                     )));
                     let git_cell = Cell::from(Line::from(Span::styled(
-                        truncate_end(&git_label, layout.git_max),
+                        truncate_end(&git_label, layout.cell_width(&resolved_widths, 3)),
                         if is_selected { row_style } else { git_style },
                     )));
                     let ports_cell = Cell::from(Line::from(Span::styled(
@@ -211,11 +207,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 LayoutKind::DetailedMedium => {
                     let activity = project.activity.relative_time();
                     let activity_cell = Cell::from(Line::from(Span::styled(
-                        truncate_end(&activity, layout.activity_max),
+                        truncate_end(&activity, layout.cell_width(&resolved_widths, 2)),
                         if is_selected { row_style } else { theme.dim },
                     )));
                     let git_cell = Cell::from(Line::from(Span::styled(
-                        truncate_end(&git_label, layout.git_max),
+                        truncate_end(&git_label, layout.cell_width(&resolved_widths, 3)),
                         if is_selected { row_style } else { git_style },
                     )));
                     Row::new(vec![
@@ -227,23 +223,30 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     ])
                     .style(row_style)
                 }
+                LayoutKind::DetailedNarrow => {
+                    let git_cell = Cell::from(Line::from(Span::styled(
+                        truncate_end(&git_label, layout.cell_width(&resolved_widths, 2)),
+                        if is_selected { row_style } else { git_style },
+                    )));
+                    Row::new(vec![name_cell, stack_cell, git_cell, health_cell]).style(row_style)
+                }
                 LayoutKind::DetailedWide => {
                     let activity = project.activity.relative_time();
                     let note = project
                         .note
                         .as_deref()
-                        .map(|value| truncate_end(value, layout.note_max))
+                        .map(|value| truncate_end(value, layout.cell_width(&resolved_widths, 5)))
                         .unwrap_or_default();
                     let status_cell = Cell::from(Line::from(Span::styled(
-                        truncate_end(project.status.as_str(), layout.status_max),
+                        truncate_end(project.status.as_str(), layout.cell_width(&resolved_widths, 3)),
                         if is_selected { row_style } else { status_style },
                     )));
                     let activity_cell = Cell::from(Line::from(Span::styled(
-                        truncate_end(&activity, layout.activity_max),
+                        truncate_end(&activity, layout.cell_width(&resolved_widths, 2)),
                         if is_selected { row_style } else { theme.dim },
                     )));
                     let git_cell = Cell::from(Line::from(Span::styled(
-                        truncate_end(&git_label, layout.git_max),
+                        truncate_end(&git_label, layout.cell_width(&resolved_widths, 4)),
                         if is_selected { row_style } else { git_style },
                     )));
                     let note_cell = Cell::from(Line::from(Span::styled(
@@ -287,6 +290,7 @@ enum LayoutKind {
     CompactNarrow,
     CompactMedium,
     CompactWide,
+    DetailedNarrow,
     DetailedMedium,
     DetailedWide,
 }
@@ -295,45 +299,22 @@ struct TableLayout {
     kind: LayoutKind,
     headers: &'static [&'static str],
     widths: Vec<Constraint>,
-    stack_max: usize,
-    activity_max: usize,
-    status_max: usize,
-    git_max: usize,
-    note_max: usize,
 }
 
 impl TableLayout {
-    fn name_width(&self, inner_w: usize) -> usize {
-        let fixed: usize = self
-            .widths
+    fn resolved_widths(&self, inner_w: u16) -> Vec<usize> {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(self.widths.clone())
+            .spacing(1)
+            .split(Rect::new(0, 0, inner_w, 1))
             .iter()
-            .skip(1)
-            .map(|constraint| match constraint {
-                Constraint::Length(value) => *value as usize,
-                Constraint::Percentage(value) => inner_w * (*value as usize) / 100,
-                Constraint::Min(value) => *value as usize,
-                Constraint::Max(value) => *value as usize,
-                Constraint::Fill(_) => 0,
-                Constraint::Ratio(num, den) => inner_w * (*num as usize) / (*den as usize),
-            })
-            .sum();
-        let spacing = self.widths.len().saturating_sub(1);
-        inner_w.saturating_sub(fixed + spacing).max(10)
+            .map(|chunk| chunk.width as usize)
+            .collect()
     }
 
-    fn column_width(&self, index: usize, inner_w: usize) -> usize {
-        let Some(constraint) = self.widths.get(index) else {
-            return 0;
-        };
-
-        match constraint {
-            Constraint::Length(value) => *value as usize,
-            Constraint::Percentage(value) => inner_w * (*value as usize) / 100,
-            Constraint::Min(value) => *value as usize,
-            Constraint::Max(value) => *value as usize,
-            Constraint::Fill(_) => inner_w,
-            Constraint::Ratio(num, den) => inner_w * (*num as usize) / (*den as usize),
-        }
+    fn cell_width(&self, widths: &[usize], index: usize) -> usize {
+        widths.get(index).copied().unwrap_or(1).saturating_sub(1).max(1)
     }
 }
 
@@ -341,119 +322,99 @@ fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
     let width = area.width;
     if matches!(view_mode, ViewMode::Compact) {
         if width < 96 {
+            let name_cap = cap_name_width(width, 18, 26);
             return TableLayout {
                 kind: LayoutKind::CompactNarrow,
                 headers: &["Name", "Stack", "Act", "Git", "H"],
                 widths: vec![
-                    Constraint::Percentage(38),
-                    Constraint::Percentage(26),
-                    Constraint::Percentage(8),
-                    Constraint::Percentage(20),
-                    Constraint::Percentage(8),
+                    Constraint::Max(name_cap),
+                    Constraint::Min(16),
+                    Constraint::Length(6),
+                    Constraint::Length(14),
+                    Constraint::Length(3),
                 ],
-                stack_max: 22,
-                activity_max: 6,
-                status_max: 0,
-                git_max: 16,
-                note_max: 0,
             };
         }
 
         if width < 126 {
+            let name_cap = cap_name_width(width, 20, 30);
             return TableLayout {
                 kind: LayoutKind::CompactMedium,
                 headers: &["Name", "Stack", "Act", "Git", "Ports", "H"],
                 widths: vec![
-                    Constraint::Percentage(38),
-                    Constraint::Percentage(24),
-                    Constraint::Percentage(8),
-                    Constraint::Percentage(14),
-                    Constraint::Percentage(10),
-                    Constraint::Percentage(6),
+                    Constraint::Max(name_cap),
+                    Constraint::Min(18),
+                    Constraint::Length(6),
+                    Constraint::Length(14),
+                    Constraint::Length(8),
+                    Constraint::Length(3),
                 ],
-                stack_max: 22,
-                activity_max: 6,
-                status_max: 0,
-                git_max: 15,
-                note_max: 0,
             };
         }
 
+        let name_cap = cap_name_width(width, 22, 32);
         return TableLayout {
             kind: LayoutKind::CompactWide,
             headers: &["Name", "Stack", "Act", "Git", "Ports", "Note", "H"],
             widths: vec![
-                Constraint::Percentage(28),
-                Constraint::Percentage(21),
-                Constraint::Percentage(7),
-                Constraint::Percentage(13),
-                Constraint::Percentage(9),
-                Constraint::Percentage(17),
-                Constraint::Percentage(5),
+                Constraint::Max(name_cap),
+                Constraint::Min(18),
+                Constraint::Length(6),
+                Constraint::Length(14),
+                Constraint::Length(8),
+                Constraint::Min(12),
+                Constraint::Length(3),
             ],
-            stack_max: 24,
-            activity_max: 6,
-            status_max: 0,
-            git_max: 15,
-            note_max: 18,
         };
     }
 
     if width < 78 {
+        let name_cap = cap_name_width(width, 18, 24);
         return TableLayout {
-            kind: LayoutKind::CompactNarrow,
+            kind: LayoutKind::DetailedNarrow,
             headers: &["Name", "Stack", "Git", "H"],
             widths: vec![
-                Constraint::Percentage(43),
-                Constraint::Percentage(27),
-                Constraint::Percentage(22),
-                Constraint::Percentage(8),
+                Constraint::Max(name_cap),
+                Constraint::Min(16),
+                Constraint::Length(14),
+                Constraint::Length(3),
             ],
-            stack_max: 20,
-            activity_max: 0,
-            status_max: 0,
-            git_max: 14,
-            note_max: 0,
         };
     }
 
     if width < 104 {
+        let name_cap = cap_name_width(width, 20, 30);
         return TableLayout {
             kind: LayoutKind::DetailedMedium,
             headers: &["Name", "Stack", "Act", "Git", "H"],
             widths: vec![
-                Constraint::Min(12),
-                Constraint::Length(22),
+                Constraint::Max(name_cap),
+                Constraint::Min(18),
                 Constraint::Length(6),
                 Constraint::Length(15),
                 Constraint::Length(3),
             ],
-            stack_max: 22,
-            activity_max: 6,
-            status_max: 0,
-            git_max: 15,
-            note_max: 0,
         };
     }
 
+    let name_cap = cap_name_width(width, 22, 32);
     TableLayout {
         kind: LayoutKind::DetailedWide,
         headers: &["Name", "Stack", "Act", "Status", "Git", "Note", "H"],
         widths: vec![
-            Constraint::Min(14),
-            Constraint::Length(24),
+            Constraint::Max(name_cap),
+            Constraint::Min(18),
             Constraint::Length(6),
             Constraint::Length(8),
             Constraint::Length(15),
-            Constraint::Length(14),
+            Constraint::Min(12),
             Constraint::Length(3),
         ],
-        stack_max: 24,
-        activity_max: 6,
-        status_max: 8,
-        git_max: 15,
-        note_max: 14,
     }
+}
+
+fn cap_name_width(width: u16, min: u16, max: u16) -> u16 {
+    (width / 3).clamp(min, max)
 }
 
 fn build_title(
@@ -584,4 +545,31 @@ fn format_ports(project: &crate::project::Project) -> String {
         .map(|port| port.to_string())
         .collect::<Vec<_>>()
         .join(",")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detailed_medium_caps_name_and_gives_extra_width_to_stack() {
+        let narrow = resolve_layout(Rect::new(0, 0, 80, 1), ViewMode::Detailed);
+        let narrow_widths = narrow.resolved_widths(78);
+        let wide = resolve_layout(Rect::new(0, 0, 100, 1), ViewMode::Detailed);
+        let wide_widths = wide.resolved_widths(98);
+
+        assert!(wide_widths[0] <= 30);
+        assert!(wide_widths[0] <= narrow_widths[0] + 4);
+        assert!(wide_widths[1] > narrow_widths[1]);
+    }
+
+    #[test]
+    fn detailed_wide_keeps_name_bounded() {
+        let layout = resolve_layout(Rect::new(0, 0, 160, 1), ViewMode::Detailed);
+        let widths = layout.resolved_widths(158);
+
+        assert!(widths[0] <= 32);
+        assert!(widths[1] >= 18);
+        assert!(widths[5] >= 12);
+    }
 }
