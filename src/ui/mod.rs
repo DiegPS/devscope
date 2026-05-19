@@ -115,7 +115,10 @@ fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, them
         Span::styled("view ", theme.muted),
         Span::styled(app.view_mode.as_str(), theme.footer_hint),
         Span::styled(" · ", theme.dim),
-        Span::styled(format!("{}/{}", app.filtered_count(), app.total_projects), theme.count),
+        Span::styled(
+            format!("{}/{}", app.filtered_count(), app.total_projects),
+            theme.count,
+        ),
         Span::styled(" · ", theme.dim),
         Span::styled(format!("{} dirty", dirty_count), theme.dirty),
     ]);

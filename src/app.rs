@@ -291,7 +291,10 @@ impl App {
         match self.filter {
             FilterField::All => true,
             FilterField::Active => project.status == ProjectStatus::Active,
-            FilterField::Dirty => project.git.as_ref().is_some_and(|g| g.dirty_status == DirtyStatus::Dirty),
+            FilterField::Dirty => project
+                .git
+                .as_ref()
+                .is_some_and(|g| g.dirty_status == DirtyStatus::Dirty),
             FilterField::Stale => project.status == ProjectStatus::Stale,
             FilterField::Paused => project.status == ProjectStatus::Paused,
             FilterField::Archived => project.status == ProjectStatus::Archived,
@@ -342,8 +345,14 @@ impl App {
             }
             SortField::Status => a.status.as_str().cmp(b.status.as_str()),
             SortField::DirtyFirst => {
-                let da = a.git.as_ref().is_some_and(|g| g.dirty_status == DirtyStatus::Dirty);
-                let db = b.git.as_ref().is_some_and(|g| g.dirty_status == DirtyStatus::Dirty);
+                let da = a
+                    .git
+                    .as_ref()
+                    .is_some_and(|g| g.dirty_status == DirtyStatus::Dirty);
+                let db = b
+                    .git
+                    .as_ref()
+                    .is_some_and(|g| g.dirty_status == DirtyStatus::Dirty);
                 db.cmp(&da).then_with(|| a.name.cmp(&b.name))
             }
             SortField::Path => a.path.cmp(&b.path),
@@ -466,11 +475,7 @@ impl App {
             use rayon::prelude::*;
             jobs.par_iter().for_each(|(project_index, path)| {
                 let (status, modified, untracked) =
-                    crate::git::get_git_status(path).unwrap_or((
-                        DirtyStatus::Error,
-                        None,
-                        None,
-                    ));
+                    crate::git::get_git_status(path).unwrap_or((DirtyStatus::Error, None, None));
                 let _ = result_tx.send(HydrationResult {
                     project_index: *project_index,
                     dirty_status: status,

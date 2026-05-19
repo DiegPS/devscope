@@ -87,7 +87,8 @@ pub fn compute_health(
         if git_info.dirty_status == DirtyStatus::Dirty {
             score -= 12;
             warnings.push(ProjectWarning::DirtyWorkingTree);
-            let total = git_info.modified_count.unwrap_or(0) + git_info.untracked_count.unwrap_or(0);
+            let total =
+                git_info.modified_count.unwrap_or(0) + git_info.untracked_count.unwrap_or(0);
             if total > 10 {
                 score -= 8;
                 warnings.push(ProjectWarning::ManyUncommittedChanges(total));

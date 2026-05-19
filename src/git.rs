@@ -100,12 +100,26 @@ fn get_ahead_behind(
 fn get_last_commit_info(repo: &Repository) -> (String, String, String, Option<i64>) {
     let head = match repo.head() {
         Ok(head) => head,
-        Err(_) => return ("none".to_string(), "no commits".to_string(), String::new(), None),
+        Err(_) => {
+            return (
+                "none".to_string(),
+                "no commits".to_string(),
+                String::new(),
+                None,
+            )
+        }
     };
 
     let commit = match head.peel_to_commit() {
         Ok(commit) => commit,
-        Err(_) => return ("none".to_string(), "no commits".to_string(), String::new(), None),
+        Err(_) => {
+            return (
+                "none".to_string(),
+                "no commits".to_string(),
+                String::new(),
+                None,
+            )
+        }
     };
 
     let hash = commit.id().to_string().chars().take(7).collect::<String>();

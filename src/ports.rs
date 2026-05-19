@@ -106,11 +106,7 @@ fn get_process_cmd(pid: u32) -> Option<String> {
 
     #[link(name = "kernel32")]
     extern "system" {
-        fn OpenProcess(
-            dw_desired_access: u32,
-            b_inherit_handle: i32,
-            dw_process_id: u32,
-        ) -> isize;
+        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32) -> isize;
 
         fn CloseHandle(h_object: isize) -> i32;
     }

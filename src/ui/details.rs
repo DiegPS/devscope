@@ -60,7 +60,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         value_width,
         theme,
     ));
-    lines.push(aligned_line("Stack", &stack, label_width, value_width, theme));
+    lines.push(aligned_line(
+        "Stack",
+        &stack,
+        label_width,
+        value_width,
+        theme,
+    ));
     lines.push(aligned_line(
         "Manager",
         project.manager.as_deref().unwrap_or("none"),
@@ -106,7 +112,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     lines.push(Line::from(vec![
         Span::styled(pad_label("Score", label_width), theme.dim),
         Span::styled(health_bar(project.health.score, bar_width), health_style),
-        Span::styled(format!(" {} {}/100", project.health.level.as_str(), project.health.score), health_style),
+        Span::styled(
+            format!(
+                " {} {}/100",
+                project.health.level.as_str(),
+                project.health.score
+            ),
+            health_style,
+        ),
     ]));
 
     let max_items = 6usize;
@@ -196,7 +209,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 )
             )
         };
-        lines.push(aligned_line("Commit", &commit_text, label_width, value_width, theme));
+        lines.push(aligned_line(
+            "Commit",
+            &commit_text,
+            label_width,
+            value_width,
+            theme,
+        ));
 
         let remote = git.remote_url.as_deref().unwrap_or("none");
         lines.push(aligned_line(
@@ -252,7 +271,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         }
         if project.commands.len() > shown_commands {
             lines.push(Line::from(Span::styled(
-                format!("    \u{2026} and {} more", project.commands.len() - shown_commands),
+                format!(
+                    "    \u{2026} and {} more",
+                    project.commands.len() - shown_commands
+                ),
                 theme.dim,
             )));
         }
@@ -368,7 +390,11 @@ fn build_summary_line(
         Span::styled(project.status.as_str().to_string(), status_style),
         Span::styled(" \u{00B7} ", theme.dim),
         Span::styled(
-            format!("{} {}/100", project.health.level.as_str(), project.health.score),
+            format!(
+                "{} {}/100",
+                project.health.level.as_str(),
+                project.health.score
+            ),
             health_style,
         ),
         Span::styled(" \u{00B7} ", theme.dim),
@@ -428,7 +454,11 @@ fn section_separator(inner_w: usize, theme: &Theme) -> Line<'static> {
 fn health_bar(score: u8, width: usize) -> String {
     let filled = (score as usize * width).div_ceil(100);
     let empty = width.saturating_sub(filled);
-    format!("[{}{}]", "\u{25A0}".repeat(filled), "\u{25A1}".repeat(empty))
+    format!(
+        "[{}{}]",
+        "\u{25A0}".repeat(filled),
+        "\u{25A1}".repeat(empty)
+    )
 }
 
 fn truncate_end(text: &str, max_width: usize) -> String {

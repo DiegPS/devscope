@@ -174,7 +174,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                         theme.command
                     };
                     let stack_cell = Cell::from(Line::from(if is_selected {
-                        vec![Span::styled(truncate_end(&stack_str, stack_width), row_style)]
+                        vec![Span::styled(
+                            truncate_end(&stack_str, stack_width),
+                            row_style,
+                        )]
                     } else {
                         colorize_stack(&truncate_end(&stack_str, stack_width), theme.stack)
                     }));
@@ -453,7 +456,13 @@ fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
     }
 }
 
-fn build_title(total: usize, scroll: usize, shown: usize, visible_rows: usize, app: &App) -> String {
+fn build_title(
+    total: usize,
+    scroll: usize,
+    shown: usize,
+    visible_rows: usize,
+    app: &App,
+) -> String {
     let prefix = if total > visible_rows {
         format!(
             " Projects {}-{} / {} ",
