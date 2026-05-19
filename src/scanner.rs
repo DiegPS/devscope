@@ -466,12 +466,12 @@ fn determine_status(
             return ProjectStatus::Active;
         }
         if days_since < 30 {
-            return ProjectStatus::Active;
+            return ProjectStatus::Paused;
         }
         if days_since < 90 {
             return ProjectStatus::Stale;
         }
-        return ProjectStatus::Stale;
+        return ProjectStatus::Archived;
     }
 
     // If git has recent activity
@@ -566,6 +566,37 @@ mod tests {
             project.health.level,
             HealthLevel::Good | HealthLevel::Warn | HealthLevel::Bad
         ));
+    }
+
+    #[test]
+    fn determine_status_uses_all_status_buckets() {
+        let now = chrono::Utc::now().timestamp();
+
+        let active = ActivityInfo {
+            last_modified_ts: None,
+            last_git_activity_ts: None,
+            timestamp: Some(now - (3 * 86_400)),
+        };
+        let paused = ActivityInfo {
+            last_modified_ts: None,
+            last_git_activity_ts: None,
+            timestamp: Some(now - (20 * 86_400)),
+        };
+        let stale = ActivityInfo {
+            last_modified_ts: None,
+            last_git_activity_ts: None,
+            timestamp: Some(now - (60 * 86_400)),
+        };
+        let archived = ActivityInfo {
+            last_modified_ts: None,
+            last_git_activity_ts: None,
+            timestamp: Some(now - (180 * 86_400)),
+        };
+
+        assert_eq!(determine_status(&active, &None), ProjectStatus::Active);
+        assert_eq!(determine_status(&paused, &None), ProjectStatus::Paused);
+        assert_eq!(determine_status(&stale, &None), ProjectStatus::Stale);
+        assert_eq!(determine_status(&archived, &None), ProjectStatus::Archived);
     }
 }
 

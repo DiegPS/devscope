@@ -18,7 +18,7 @@ mod ui;
 use std::path::Path;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Error, Result};
 use clap::Parser;
 
 use cli::{Cli, Commands};
@@ -198,7 +198,7 @@ fn cmd_status(project: String, new_status: String) -> Result<()> {
     let mut config = config::load_config()?;
     ensure_roots_or_auto_discover(&mut config)?;
     let resolved = find_project_path(&config, &project)?;
-    let status = project::ProjectStatus::from_str(&new_status);
+    let status: project::ProjectStatus = new_status.parse().map_err(Error::msg)?;
     config::set_project_status(&mut config, &resolved, status.clone());
     config::record_open(&mut config, &resolved);
     config::save_config(&config)?;

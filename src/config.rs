@@ -233,10 +233,7 @@ pub fn save_config(config: &Config) -> Result<()> {
 }
 
 pub fn get_project_status(config: &Config, path: &str) -> Option<ProjectStatus> {
-    config
-        .project_status
-        .get(path)
-        .map(|s| ProjectStatus::from_str(s))
+    config.project_status.get(path).and_then(|s| s.parse().ok())
 }
 
 pub fn set_project_status(config: &mut Config, path: &str, status: ProjectStatus) {

@@ -1,6 +1,7 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use crate::commands::ProjectCommand;
 
@@ -53,21 +54,28 @@ impl ProjectStatus {
             Self::Unknown => "unknown",
         }
     }
-
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "active" => Self::Active,
-            "paused" => Self::Paused,
-            "stale" => Self::Stale,
-            "archived" => Self::Archived,
-            _ => Self::Unknown,
-        }
-    }
 }
 
 impl std::fmt::Display for ProjectStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl FromStr for ProjectStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim() {
+            value if value.eq_ignore_ascii_case("active") => Ok(Self::Active),
+            value if value.eq_ignore_ascii_case("paused") => Ok(Self::Paused),
+            value if value.eq_ignore_ascii_case("stale") => Ok(Self::Stale),
+            value if value.eq_ignore_ascii_case("archived") => Ok(Self::Archived),
+            value if value.eq_ignore_ascii_case("unknown") => Ok(Self::Unknown),
+            other => Err(format!(
+                "invalid project status '{other}'. Expected one of: active, paused, stale, archived"
+            )),
+        }
     }
 }
 
@@ -250,4 +258,35 @@ pub struct Project {
     pub artifacts: Vec<ProjectArtifact>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ports: Vec<u16>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProjectStatus;
+    use std::str::FromStr;
+
+    #[test]
+    fn project_status_parses_case_insensitively() {
+        assert_eq!(
+            ProjectStatus::from_str("ACTIVE").unwrap(),
+            ProjectStatus::Active
+        );
+        assert_eq!(
+            ProjectStatus::from_str("paused").unwrap(),
+            ProjectStatus::Paused
+        );
+        assert_eq!(
+            ProjectStatus::from_str("Stale").unwrap(),
+            ProjectStatus::Stale
+        );
+        assert_eq!(
+            ProjectStatus::from_str("archived").unwrap(),
+            ProjectStatus::Archived
+        );
+    }
+
+    #[test]
+    fn project_status_rejects_invalid_values() {
+        assert!(ProjectStatus::from_str("maybe").is_err());
+    }
 }
