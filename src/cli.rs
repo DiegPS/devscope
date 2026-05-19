@@ -5,8 +5,8 @@ use clap::{Parser, Subcommand};
     name = "devscope",
     version,
     about = "Fast local project scanner and TUI dashboard",
-    long_about = "Fast local project scanner and TUI dashboard.\n\nRun without a subcommand to launch the interactive TUI.",
-    after_help = "Examples:\n  devscope\n  devscope scan\n  devscope list --json\n  devscope add-root C:\\Users\\me\\projects\n  devscope note devscope \"Needs perf review\"\n  devscope status devscope active\n  devscope discover --apply"
+    long_about = "Fast local project scanner and TUI dashboard.\n\nRun without a subcommand to launch the interactive TUI, or pass a path like `devscope .` to scan only that directory tree for the current session.",
+    after_help = "Examples:\n  devscope\n  devscope .\n  devscope scan\n  devscope list --json\n  devscope add-root C:\\Users\\me\\projects\n  devscope note devscope \"Needs perf review\"\n  devscope status devscope active\n  devscope discover --apply"
 )]
 pub struct Cli {
     #[command(subcommand)]

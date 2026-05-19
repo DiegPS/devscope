@@ -197,7 +197,30 @@ pub fn normalize_path(path: &std::path::Path) -> PathBuf {
             other => components.push(other),
         }
     }
-    components.iter().collect()
+
+    let normalized: PathBuf = components.iter().collect();
+    if normalized.as_os_str().is_empty() && !path.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalized
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_path;
+    use std::path::Path;
+
+    #[test]
+    fn normalize_path_keeps_current_directory_when_components_collapse() {
+        let dot = normalize_path(Path::new("."));
+        assert_eq!(dot.display().to_string(), ".");
+        assert!(!dot.as_os_str().is_empty());
+
+        let collapsed = normalize_path(Path::new("a/.."));
+        assert_eq!(collapsed.display().to_string(), ".");
+        assert!(!collapsed.as_os_str().is_empty());
+    }
 }
 
 pub fn load_config() -> Result<Config> {

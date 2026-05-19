@@ -25,6 +25,10 @@ use cli::{Cli, Commands};
 use config::Config;
 
 fn main() -> Result<()> {
+    if let Some(root_arg) = temporary_root_arg(&std::env::args().collect::<Vec<_>>()) {
+        return run_tui_for_root(root_arg);
+    }
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -58,6 +62,70 @@ fn main() -> Result<()> {
             Commands::Discover { apply } => cmd_discover(apply),
         },
     }
+}
+
+fn run_tui_for_root(root_arg: String) -> Result<()> {
+    let config = build_temporary_root_config(config::load_config()?, &root_arg)?;
+    tui::run_tui(config)
+}
+
+fn build_temporary_root_config(mut config: Config, root_arg: &str) -> Result<Config> {
+    let expanded = config::expand_tilde(root_arg);
+    let normalized = config::normalize_path(&expanded);
+
+    if !normalized.exists() {
+        anyhow::bail!("Path does not exist: {}", normalized.display());
+    }
+
+    if !normalized.is_dir() {
+        anyhow::bail!("Path is not a directory: {}", normalized.display());
+    }
+
+    config.roots = vec![normalized.to_string_lossy().to_string()];
+    Ok(config)
+}
+
+fn temporary_root_arg(args: &[String]) -> Option<String> {
+    if args.len() != 2 {
+        return None;
+    }
+
+    let arg = args[1].trim();
+    if arg.is_empty() || arg.starts_with('-') || is_builtin_command(arg) {
+        return None;
+    }
+
+    if arg == "."
+        || arg == ".."
+        || arg.starts_with("./")
+        || arg.starts_with(".\\")
+        || arg.starts_with("~/")
+        || arg.starts_with("~\\")
+        || arg.contains('/')
+        || arg.contains('\\')
+        || Path::new(arg).exists()
+    {
+        return Some(arg.to_string());
+    }
+
+    None
+}
+
+fn is_builtin_command(arg: &str) -> bool {
+    matches!(
+        arg,
+        "scan"
+            | "list"
+            | "add-root"
+            | "remove-root"
+            | "roots"
+            | "note"
+            | "status"
+            | "config"
+            | "open"
+            | "discover"
+            | "help"
+    )
 }
 
 fn cmd_scan() -> Result<()> {
@@ -382,5 +450,48 @@ fn find_project_path(config: &config::Config, identifier: &str) -> Result<String
             }
             anyhow::bail!("Please use the full path instead");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_root_arg_accepts_dot() {
+        let args = vec!["devscope".to_string(), ".".to_string()];
+        assert_eq!(temporary_root_arg(&args), Some(".".to_string()));
+    }
+
+    #[test]
+    fn temporary_root_arg_rejects_known_subcommands() {
+        let args = vec!["devscope".to_string(), "scan".to_string()];
+        assert_eq!(temporary_root_arg(&args), None);
+    }
+
+    #[test]
+    fn temporary_root_arg_accepts_path_like_values() {
+        let args = vec!["devscope".to_string(), "./projects".to_string()];
+        assert_eq!(temporary_root_arg(&args), Some("./projects".to_string()));
+    }
+
+    #[test]
+    fn build_temporary_root_config_overrides_roots_without_touching_other_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config {
+            roots: vec!["C:\\existing".to_string()],
+            max_depth: 7,
+            ..Config::default()
+        };
+
+        let updated =
+            build_temporary_root_config(config.clone(), dir.path().to_str().unwrap()).unwrap();
+
+        assert_eq!(updated.roots.len(), 1);
+        assert_eq!(
+            updated.roots[0],
+            config::normalize_path(dir.path()).to_string_lossy().to_string()
+        );
+        assert_eq!(updated.max_depth, 7);
     }
 }
