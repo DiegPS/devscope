@@ -12,6 +12,9 @@ pub struct Config {
     #[serde(default)]
     pub roots: Vec<String>,
 
+    #[serde(skip)]
+    pub session_roots: Option<Vec<String>>,
+
     #[serde(default = "default_max_depth")]
     pub max_depth: usize,
 
@@ -139,6 +142,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             roots: Vec::new(),
+            session_roots: None,
             max_depth: default_max_depth(),
             respect_gitignore: true,
             scan_hidden: false,
@@ -149,6 +153,12 @@ impl Default for Config {
             notes: std::collections::HashMap::new(),
             scores: ScoreMap::new(),
         }
+    }
+}
+
+impl Config {
+    pub fn active_roots(&self) -> &[String] {
+        self.session_roots.as_deref().unwrap_or(&self.roots)
     }
 }
 
@@ -221,7 +231,7 @@ pub fn normalize_path(path: &std::path::Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_path;
+    use super::{normalize_path, Config};
     use std::path::Path;
 
     #[test]
@@ -249,6 +259,44 @@ mod tests {
     fn normalize_path_collapses_children_before_parent_components() {
         assert_eq!(normalize_path(Path::new("a/b/../c")), Path::new("a/c"));
         assert_eq!(normalize_path(Path::new("a/../../b")), Path::new("../b"));
+    }
+
+    #[test]
+    fn active_roots_uses_session_override_without_mutating_roots() {
+        let config = Config {
+            roots: vec!["C:\\projects".to_string(), "D:\\work".to_string()],
+            session_roots: Some(vec!["C:\\temp-only".to_string()]),
+            ..Config::default()
+        };
+
+        assert_eq!(config.active_roots(), &["C:\\temp-only".to_string()]);
+        assert_eq!(
+            config.roots,
+            vec!["C:\\projects".to_string(), "D:\\work".to_string()]
+        );
+    }
+
+    #[test]
+    fn session_roots_are_not_serialized() {
+        let config = Config {
+            roots: vec!["C:\\projects".to_string()],
+            session_roots: Some(vec!["C:\\temp-only".to_string()]),
+            ..Config::default()
+        };
+
+        let toml = toml::to_string(&config).unwrap();
+        let parsed: toml::Value = toml::from_str(&toml).unwrap();
+
+        assert_eq!(
+            parsed
+                .get("roots")
+                .and_then(|roots| roots.as_array())
+                .and_then(|roots| roots.first())
+                .and_then(|root| root.as_str()),
+            Some("C:\\projects")
+        );
+        assert!(parsed.get("session_roots").is_none());
+        assert!(!toml.contains("temp-only"));
     }
 }
 

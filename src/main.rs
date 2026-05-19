@@ -81,7 +81,7 @@ fn build_temporary_root_config(mut config: Config, root_arg: &str) -> Result<Con
         anyhow::bail!("Path is not a directory: {}", normalized.display());
     }
 
-    config.roots = vec![normalized.to_string_lossy().to_string()];
+    config.session_roots = Some(vec![normalized.to_string_lossy().to_string()]);
     Ok(config)
 }
 
@@ -487,10 +487,12 @@ mod tests {
         let updated =
             build_temporary_root_config(config.clone(), dir.path().to_str().unwrap()).unwrap();
 
-        assert_eq!(updated.roots.len(), 1);
+        assert_eq!(updated.roots, config.roots);
         assert_eq!(
-            updated.roots[0],
-            config::normalize_path(dir.path()).to_string_lossy().to_string()
+            updated.session_roots,
+            Some(vec![
+                config::normalize_path(dir.path()).to_string_lossy().to_string()
+            ])
         );
         assert_eq!(updated.max_depth, 7);
     }

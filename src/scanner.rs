@@ -97,7 +97,7 @@ pub fn scan_roots(config: &Config) -> Result<ScanResult> {
     let mut all_projects = Vec::new();
     let mut visited = HashSet::new();
 
-    for root_str in &config.roots {
+    for root_str in config.active_roots() {
         let root = normalize_path(&expand_tilde(root_str));
         if !root.exists() {
             eprintln!("Warning: root path does not exist: {}", root.display());
