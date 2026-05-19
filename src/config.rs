@@ -191,7 +191,20 @@ pub fn normalize_path(path: &std::path::Path) -> PathBuf {
     for component in path.components() {
         match component {
             std::path::Component::ParentDir => {
-                components.pop();
+                match components.last().copied() {
+                    Some(std::path::Component::Normal(_)) => {
+                        components.pop();
+                    }
+                    Some(std::path::Component::CurDir) => {
+                        components.pop();
+                        components.push(component);
+                    }
+                    Some(std::path::Component::ParentDir) | None => {
+                        components.push(component);
+                    }
+                    Some(std::path::Component::RootDir)
+                    | Some(std::path::Component::Prefix(_)) => {}
+                }
             }
             std::path::Component::CurDir => {}
             other => components.push(other),
@@ -220,6 +233,22 @@ mod tests {
         let collapsed = normalize_path(Path::new("a/.."));
         assert_eq!(collapsed.display().to_string(), ".");
         assert!(!collapsed.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn normalize_path_preserves_leading_parent_components() {
+        assert_eq!(normalize_path(Path::new("..")), Path::new(".."));
+        assert_eq!(normalize_path(Path::new("../projects")), Path::new("../projects"));
+        assert_eq!(
+            normalize_path(Path::new("..\\projects")),
+            Path::new("..\\projects")
+        );
+    }
+
+    #[test]
+    fn normalize_path_collapses_children_before_parent_components() {
+        assert_eq!(normalize_path(Path::new("a/b/../c")), Path::new("a/c"));
+        assert_eq!(normalize_path(Path::new("a/../../b")), Path::new("../b"));
     }
 }
 
