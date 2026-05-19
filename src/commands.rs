@@ -342,8 +342,18 @@ fn detect_docker_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
 // ── .NET ────────────────────────────────────────────────────────────────
 
 fn detect_dotnet_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
-    let has_dotnet =
-        path.join(".sln").exists() || has_extension(path, ".sln") || has_extension(path, ".csproj");
+    let mut has_dotnet = false;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if let Some(ext) = p.extension() {
+                if ext == "sln" || ext == "csproj" {
+                    has_dotnet = true;
+                    break;
+                }
+            }
+        }
+    }
 
     if !has_dotnet {
         return;
@@ -364,18 +374,6 @@ fn detect_dotnet_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
         command: "dotnet test".to_string(),
         kind: ProjectCommandKind::Test,
     });
-}
-
-fn has_extension(dir: &Path, ext: &str) -> bool {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            if name.to_string_lossy().ends_with(ext) {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 // ── Java ────────────────────────────────────────────────────────────────
