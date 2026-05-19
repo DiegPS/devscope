@@ -134,15 +134,13 @@ pub fn compute_health(
     } else {
         score -= 5;
         warnings.push(ProjectWarning::NoGit);
-    }
 
-    // Activity staleness
-    if let Some(ts) = activity_timestamp {
-        let now = chrono::Utc::now().timestamp();
-        let days = (now - ts) / 86400;
-        if days > 90 {
-            score -= 10;
-            if !warnings.contains(&ProjectWarning::StaleBranch) {
+        // Activity staleness (only if not a git repo, since git staleness is handled above)
+        if let Some(ts) = activity_timestamp {
+            let now = chrono::Utc::now().timestamp();
+            let days = (now - ts) / 86400;
+            if days > 90 {
+                score -= 10;
                 warnings.push(ProjectWarning::LowActivity);
             }
         }
@@ -175,28 +173,17 @@ pub fn compute_health(
 fn detect_env_files(path: &Path) -> Vec<ProjectWarning> {
     let mut found = Vec::new();
 
-    if path.join(".env").exists() {
-        found.push(ProjectWarning::EnvFilePresent);
-    }
-    if path.join(".env.local").exists() {
-        found.push(ProjectWarning::EnvFileLocal);
-    }
-    if path.join(".env.production").exists() {
-        found.push(ProjectWarning::EnvFileProduction);
-    }
-
-    // Check for other .env.* files
     if let Ok(entries) = std::fs::read_dir(path) {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
-            if name_str.starts_with(".env.")
-                && name_str != ".env.local"
-                && name_str != ".env.production"
-            {
-                let suffix = name_str.strip_prefix(".env.").unwrap_or(&name_str);
-                if !["local", "production"].contains(&suffix) {
-                    found.push(ProjectWarning::EnvFileCustom(suffix.to_string()));
+            if name_str == ".env" {
+                found.push(ProjectWarning::EnvFilePresent);
+            } else if let Some(suffix) = name_str.strip_prefix(".env.") {
+                match suffix {
+                    "local" => found.push(ProjectWarning::EnvFileLocal),
+                    "production" => found.push(ProjectWarning::EnvFileProduction),
+                    _ => found.push(ProjectWarning::EnvFileCustom(suffix.to_string())),
                 }
             }
         }
