@@ -1,38 +1,46 @@
 use std::path::Path;
 
+use crate::snapshot::DirSnapshot;
+
 /// Detect the tech stack of a project by examining its files.
+#[allow(dead_code)]
 pub fn detect_stack(project_path: &Path) -> Vec<String> {
+    detect_stack_with_snapshot(&DirSnapshot::read(project_path))
+}
+
+pub(crate) fn detect_stack_with_snapshot(snapshot: &DirSnapshot) -> Vec<String> {
+    let project_path = snapshot.root();
     let mut stack = Vec::new();
 
     // Flutter/Dart
-    if project_path.join("pubspec.yaml").exists() {
+    if snapshot.has("pubspec.yaml") {
         stack.push("Flutter/Dart".to_string());
 
-        if project_path.join("windows").exists() {
+        if snapshot.has("windows") {
             stack.push("Windows".to_string());
         }
-        if project_path.join("android").exists() {
+        if snapshot.has("android") {
             stack.push("Android".to_string());
         }
-        if project_path.join("ios").exists() {
+        if snapshot.has("ios") {
             stack.push("iOS".to_string());
         }
-        if project_path.join("web").exists() {
+        if snapshot.has("web") {
             stack.push("Web".to_string());
         }
-        if project_path.join("linux").exists() {
+        if snapshot.has("linux") {
             stack.push("Linux".to_string());
         }
-        if project_path.join("macos").exists() {
+        if snapshot.has("macos") {
             stack.push("macOS".to_string());
         }
     }
 
     // Node.js ecosystem
-    if project_path.join("package.json").exists() {
+    if snapshot.has("package.json") {
         stack.push("Node".to_string());
 
-        if let Ok(content) = std::fs::read_to_string(project_path.join("package.json")) {
+        if let Some(content) = snapshot.read_to_string("package.json") {
             let lower = content.to_lowercase();
 
             if lower.contains("\"react\"") || lower.contains("\"react-dom\"") {
@@ -78,19 +86,19 @@ pub fn detect_stack(project_path: &Path) -> Vec<String> {
     }
 
     // pnpm / yarn / npm lock files
-    if project_path.join("pnpm-lock.yaml").exists() {
+    if snapshot.has("pnpm-lock.yaml") {
         stack.push("pnpm".to_string());
-    } else if project_path.join("yarn.lock").exists() {
+    } else if snapshot.has("yarn.lock") {
         stack.push("yarn".to_string());
-    } else if project_path.join("package-lock.json").exists() {
+    } else if snapshot.has("package-lock.json") {
         stack.push("npm".to_string());
     }
 
     // Rust
-    if project_path.join("Cargo.toml").exists() {
+    if snapshot.has("Cargo.toml") {
         stack.push("Rust".to_string());
 
-        if let Ok(content) = std::fs::read_to_string(project_path.join("Cargo.toml")) {
+        if let Some(content) = snapshot.read_to_string("Cargo.toml") {
             let lower = content.to_lowercase();
             if lower.contains("ratatui") {
                 stack.push("Ratatui".to_string());
@@ -117,20 +125,20 @@ pub fn detect_stack(project_path: &Path) -> Vec<String> {
     }
 
     // Go
-    if project_path.join("go.mod").exists() {
+    if snapshot.has("go.mod") {
         stack.push("Go".to_string());
     }
 
     // Python
-    if project_path.join("pyproject.toml").exists()
-        || project_path.join("requirements.txt").exists()
-        || project_path.join("Pipfile").exists()
-        || project_path.join("setup.py").exists()
+    if snapshot.has("pyproject.toml")
+        || snapshot.has("requirements.txt")
+        || snapshot.has("Pipfile")
+        || snapshot.has("setup.py")
     {
         stack.push("Python".to_string());
 
         let check_file = |filename: &str| -> Option<String> {
-            if let Ok(content) = std::fs::read_to_string(project_path.join(filename)) {
+            if let Some(content) = snapshot.read_to_string(filename) {
                 let lower = content.to_lowercase();
                 if lower.contains("fastapi") {
                     return Some("FastAPI".to_string());
@@ -167,12 +175,10 @@ pub fn detect_stack(project_path: &Path) -> Vec<String> {
     }
 
     // Docker
-    if project_path.join("Dockerfile").exists() {
+    if snapshot.has("Dockerfile") {
         stack.push("Docker".to_string());
     }
-    if project_path.join("docker-compose.yml").exists()
-        || project_path.join("docker-compose.yaml").exists()
-    {
+    if snapshot.has("docker-compose.yml") || snapshot.has("docker-compose.yaml") {
         if !stack_contains(&stack, "Docker") {
             stack.push("Docker".to_string());
         }
@@ -180,30 +186,16 @@ pub fn detect_stack(project_path: &Path) -> Vec<String> {
     }
 
     // .NET / C#
-    if !project_path.join("Cargo.toml").exists() {
-        let has_sln = std::fs::read_dir(project_path)
-            .ok()
-            .map(|entries| {
-                entries.filter_map(|e| e.ok()).any(|e| {
-                    e.path()
-                        .extension()
-                        .map(|ext| ext == "sln")
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
+    if !snapshot.has("Cargo.toml") {
+        let has_sln = snapshot
+            .entries()
+            .iter()
+            .any(|entry| entry.is_file && entry.name.ends_with(".sln"));
 
-        let has_csproj = std::fs::read_dir(project_path)
-            .ok()
-            .map(|entries| {
-                entries.filter_map(|e| e.ok()).any(|e| {
-                    e.path()
-                        .extension()
-                        .map(|ext| ext == "csproj")
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
+        let has_csproj = snapshot
+            .entries()
+            .iter()
+            .any(|entry| entry.is_file && entry.name.ends_with(".csproj"));
 
         if has_sln || has_csproj {
             stack.push(".NET".to_string());
@@ -212,19 +204,18 @@ pub fn detect_stack(project_path: &Path) -> Vec<String> {
     }
 
     // Java
-    if project_path.join("pom.xml").exists() {
+    if snapshot.has("pom.xml") {
         stack.push("Java".to_string());
         stack.push("Maven".to_string());
     }
-    if project_path.join("build.gradle").exists() || project_path.join("build.gradle.kts").exists()
-    {
+    if snapshot.has("build.gradle") || snapshot.has("build.gradle.kts") {
         stack.push("Java".to_string());
         stack.push("Gradle".to_string());
     }
 
     // Kotlin
-    if project_path.join("build.gradle.kts").exists() {
-        if let Ok(content) = std::fs::read_to_string(project_path.join("build.gradle.kts")) {
+    if snapshot.has("build.gradle.kts") {
+        if let Some(content) = snapshot.read_to_string("build.gradle.kts") {
             if (content.contains("kotlin") || content.contains("org.jetbrains.kotlin"))
                 && !stack_contains(&stack, "Kotlin")
             {
@@ -234,14 +225,14 @@ pub fn detect_stack(project_path: &Path) -> Vec<String> {
     }
 
     // C/C++
-    if project_path.join("CMakeLists.txt").exists() {
+    if snapshot.has("CMakeLists.txt") {
         stack.push("C/C++".to_string());
         stack.push("CMake".to_string());
     }
-    if project_path.join("Makefile").exists()
+    if snapshot.has("Makefile")
         && !stack_contains(&stack, "C/C++")
-        && (project_path.join("main.c").exists()
-            || project_path.join("main.cpp").exists()
+        && (snapshot.has("main.c")
+            || snapshot.has("main.cpp")
             || project_path.join("src").join("main.c").exists()
             || project_path.join("src").join("main.cpp").exists())
     {
@@ -249,33 +240,33 @@ pub fn detect_stack(project_path: &Path) -> Vec<String> {
     }
 
     // Ruby
-    if project_path.join("Gemfile").exists() {
+    if snapshot.has("Gemfile") {
         stack.push("Ruby".to_string());
-        if project_path.join("Rakefile").exists() {
+        if snapshot.has("Rakefile") {
             stack.push("Rails".to_string());
         }
     }
 
     // Swift
-    if project_path.join("Package.swift").exists() {
+    if snapshot.has("Package.swift") {
         stack.push("Swift".to_string());
     }
 
     // Deno
-    if project_path.join("deno.json").exists() || project_path.join("deno.jsonc").exists() {
+    if snapshot.has("deno.json") || snapshot.has("deno.jsonc") {
         stack.push("Deno".to_string());
     }
 
     // Bun
-    if project_path.join("bun.lockb").exists() || project_path.join("bunfig.toml").exists() {
+    if snapshot.has("bun.lockb") || snapshot.has("bunfig.toml") {
         stack.push("Bun".to_string());
     }
 
     // Database / migrations
-    let has_migrations = project_path.join("migrations").exists()
+    let has_migrations = snapshot.has("migrations")
         || project_path.join("db").join("migrations").exists()
         || project_path.join("database").join("migrations").exists()
-        || project_path.join("prisma").exists();
+        || snapshot.has("prisma");
 
     if has_migrations {
         stack.push("DB".to_string());
@@ -289,52 +280,61 @@ fn stack_contains(stack: &[String], needle: &str) -> bool {
 }
 
 /// Detect the package manager used by the project.
+#[allow(dead_code)]
 pub fn detect_manager(project_path: &Path) -> Option<String> {
-    if project_path.join("pnpm-lock.yaml").exists() {
+    detect_manager_with_snapshot(&DirSnapshot::read(project_path))
+}
+
+pub(crate) fn detect_manager_with_snapshot(snapshot: &DirSnapshot) -> Option<String> {
+    if snapshot.has("pnpm-lock.yaml") {
         return Some("pnpm".to_string());
     }
-    if project_path.join("yarn.lock").exists() {
+    if snapshot.has("yarn.lock") {
         return Some("yarn".to_string());
     }
-    if project_path.join("package-lock.json").exists() {
+    if snapshot.has("package-lock.json") {
         return Some("npm".to_string());
     }
-    if project_path.join("Cargo.toml").exists() {
+    if snapshot.has("Cargo.toml") {
         return Some("cargo".to_string());
     }
-    if project_path.join("go.mod").exists() {
+    if snapshot.has("go.mod") {
         return Some("go".to_string());
     }
-    if project_path.join("pubspec.yaml").exists() {
+    if snapshot.has("pubspec.yaml") {
         return Some("pub".to_string());
     }
-    if project_path.join("pyproject.toml").exists() {
+    if snapshot.has("pyproject.toml") {
         return Some("pip/poetry".to_string());
     }
-    if project_path.join("Pipfile").exists() {
+    if snapshot.has("Pipfile") {
         return Some("pipenv".to_string());
     }
-    if project_path.join("requirements.txt").exists() {
+    if snapshot.has("requirements.txt") {
         return Some("pip".to_string());
     }
-    if project_path.join("Gemfile").exists() {
+    if snapshot.has("Gemfile") {
         return Some("bundler".to_string());
     }
-    if project_path.join("pom.xml").exists() {
+    if snapshot.has("pom.xml") {
         return Some("maven".to_string());
     }
-    if project_path.join("build.gradle").exists() || project_path.join("build.gradle.kts").exists()
-    {
+    if snapshot.has("build.gradle") || snapshot.has("build.gradle.kts") {
         return Some("gradle".to_string());
     }
     None
 }
 
 /// Detect available scripts from package.json.
+#[allow(dead_code)]
 pub fn detect_scripts(project_path: &Path) -> Vec<String> {
+    detect_scripts_with_snapshot(&DirSnapshot::read(project_path))
+}
+
+pub(crate) fn detect_scripts_with_snapshot(snapshot: &DirSnapshot) -> Vec<String> {
     let mut scripts = Vec::new();
 
-    if let Ok(content) = std::fs::read_to_string(project_path.join("package.json")) {
+    if let Some(content) = snapshot.read_to_string("package.json") {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
             if let Some(obj) = json.get("scripts").and_then(|s| s.as_object()) {
                 for key in obj.keys() {

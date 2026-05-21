@@ -2,10 +2,28 @@ use std::path::Path;
 
 use crate::git;
 use crate::project::{DirtyStatus, GitInfo, HealthLevel, ProjectHealth, ProjectWarning};
+use crate::snapshot::DirSnapshot;
 
 /// Calculate a health score (0-100) and collect warnings/positives.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn compute_health(
     path: &Path,
+    git: &Option<GitInfo>,
+    activity_timestamp: Option<i64>,
+    has_commands: bool,
+) -> ProjectHealth {
+    compute_health_with_snapshot(
+        &DirSnapshot::read(path),
+        path,
+        git,
+        activity_timestamp,
+        has_commands,
+    )
+}
+
+pub(crate) fn compute_health_with_snapshot(
+    snapshot: &DirSnapshot,
+    _path: &Path,
     git: &Option<GitInfo>,
     activity_timestamp: Option<i64>,
     has_commands: bool,
@@ -14,21 +32,20 @@ pub fn compute_health(
     let mut positives = Vec::new();
 
     // ── README ──────────────────────────────────────────────────────
-    let has_readme = path.join("README.md").exists()
-        || path.join("readme.md").exists()
-        || path.join("README").exists();
+    let has_readme =
+        snapshot.has("README.md") || snapshot.has("readme.md") || snapshot.has("README");
     if has_readme {
         positives.push("README".to_string());
     }
 
     // ── .gitignore ──────────────────────────────────────────────────
-    let has_gitignore = path.join(".gitignore").exists();
+    let has_gitignore = snapshot.has(".gitignore");
     if has_gitignore {
         positives.push(".gitignore".to_string());
     }
 
     // ── Env files (detect existence, never read) ────────────────────
-    let env_files = detect_env_files(path);
+    let env_files = detect_env_files(snapshot);
 
     // ── Commands ────────────────────────────────────────────────────
     if has_commands {
@@ -147,7 +164,7 @@ pub fn compute_health(
     }
 
     // Mixed lockfiles
-    if let Some(mgr) = detect_mixed_lockfiles(path) {
+    if let Some(mgr) = detect_mixed_lockfiles(snapshot) {
         score -= 15;
         warnings.push(ProjectWarning::MixedLockfiles(mgr));
     }
@@ -170,21 +187,17 @@ pub fn compute_health(
 }
 
 /// Detect .env files by checking existence only (never read contents).
-fn detect_env_files(path: &Path) -> Vec<ProjectWarning> {
+fn detect_env_files(snapshot: &DirSnapshot) -> Vec<ProjectWarning> {
     let mut found = Vec::new();
 
-    if let Ok(entries) = std::fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if name_str == ".env" {
-                found.push(ProjectWarning::EnvFilePresent);
-            } else if let Some(suffix) = name_str.strip_prefix(".env.") {
-                match suffix {
-                    "local" => found.push(ProjectWarning::EnvFileLocal),
-                    "production" => found.push(ProjectWarning::EnvFileProduction),
-                    _ => found.push(ProjectWarning::EnvFileCustom(suffix.to_string())),
-                }
+    for entry in snapshot.entries() {
+        if entry.name == ".env" {
+            found.push(ProjectWarning::EnvFilePresent);
+        } else if let Some(suffix) = entry.name.strip_prefix(".env.") {
+            match suffix {
+                "local" => found.push(ProjectWarning::EnvFileLocal),
+                "production" => found.push(ProjectWarning::EnvFileProduction),
+                _ => found.push(ProjectWarning::EnvFileCustom(suffix.to_string())),
             }
         }
     }
@@ -193,9 +206,8 @@ fn detect_env_files(path: &Path) -> Vec<ProjectWarning> {
 }
 
 /// Detect mixed package manager lockfiles in Node projects.
-fn detect_mixed_lockfiles(path: &Path) -> Option<String> {
-    let package_json = path.join("package.json");
-    if !package_json.exists() {
+fn detect_mixed_lockfiles(snapshot: &DirSnapshot) -> Option<String> {
+    if !snapshot.has("package.json") {
         return None;
     }
 
@@ -209,7 +221,7 @@ fn detect_mixed_lockfiles(path: &Path) -> Option<String> {
 
     let mut found: Vec<&str> = Vec::new();
     for (name, file) in &lockfiles {
-        if path.join(file).exists() {
+        if snapshot.has(file) {
             let normalized = if name.starts_with("bun") {
                 "bun"
             } else {

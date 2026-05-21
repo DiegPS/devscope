@@ -12,6 +12,7 @@ mod ports;
 mod project;
 mod scanner;
 mod scoring;
+mod snapshot;
 mod tui;
 mod ui;
 

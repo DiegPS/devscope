@@ -2,6 +2,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::snapshot::DirSnapshot;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ProjectCommandKind {
     Start,
@@ -21,17 +23,25 @@ pub struct ProjectCommand {
 
 /// Detect suggested commands for a project based on its tech stack.
 /// Reads config files (package.json, Cargo.toml, etc.) but never executes anything.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn detect_commands(project_path: &Path, detected_stack: &[String]) -> Vec<ProjectCommand> {
+    detect_commands_with_snapshot(&DirSnapshot::read(project_path), detected_stack)
+}
+
+pub(crate) fn detect_commands_with_snapshot(
+    snapshot: &DirSnapshot,
+    detected_stack: &[String],
+) -> Vec<ProjectCommand> {
     let mut commands = Vec::new();
 
-    detect_node_commands(project_path, &mut commands);
-    detect_flutter_commands(project_path, &mut commands);
-    detect_rust_commands(project_path, &mut commands);
-    detect_go_commands(project_path, &mut commands);
-    detect_python_commands(project_path, detected_stack, &mut commands);
-    detect_docker_commands(project_path, &mut commands);
-    detect_dotnet_commands(project_path, &mut commands);
-    detect_java_commands(project_path, &mut commands);
+    detect_node_commands(snapshot, &mut commands);
+    detect_flutter_commands(snapshot, &mut commands);
+    detect_rust_commands(snapshot, &mut commands);
+    detect_go_commands(snapshot, &mut commands);
+    detect_python_commands(snapshot, detected_stack, &mut commands);
+    detect_docker_commands(snapshot, &mut commands);
+    detect_dotnet_commands(snapshot, &mut commands);
+    detect_java_commands(snapshot, &mut commands);
 
     // Limit to 6 commands
     commands.truncate(6);
@@ -40,18 +50,16 @@ pub fn detect_commands(project_path: &Path, detected_stack: &[String]) -> Vec<Pr
 
 // ── Node ────────────────────────────────────────────────────────────────
 
-fn detect_node_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
-    let pkg_path = path.join("package.json");
-    if !pkg_path.exists() {
+fn detect_node_commands(snapshot: &DirSnapshot, out: &mut Vec<ProjectCommand>) {
+    if !snapshot.has("package.json") {
         return;
     }
 
-    let scripts = match parse_package_json_scripts(&pkg_path) {
+    let pm = detect_node_pm(snapshot);
+    let scripts = match parse_package_json_scripts(snapshot, &pm) {
         Some(s) => s,
         None => return,
     };
-
-    let pm = detect_node_pm(path);
 
     for (script_name, run_cmd) in &scripts {
         let (label, kind) = match script_name.as_str() {
@@ -77,29 +85,28 @@ fn detect_node_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
     });
 }
 
-fn detect_node_pm(path: &Path) -> String {
-    if path.join("pnpm-lock.yaml").exists() {
+fn detect_node_pm(snapshot: &DirSnapshot) -> String {
+    if snapshot.has("pnpm-lock.yaml") {
         "pnpm".to_string()
-    } else if path.join("yarn.lock").exists() {
+    } else if snapshot.has("yarn.lock") {
         "yarn".to_string()
-    } else if path.join("bun.lockb").exists() || path.join("bun.lock").exists() {
+    } else if snapshot.has("bun.lockb") || snapshot.has("bun.lock") {
         "bun".to_string()
     } else {
         "npm".to_string()
     }
 }
 
-fn parse_package_json_scripts(path: &Path) -> Option<Vec<(String, String)>> {
-    let content = std::fs::read_to_string(path).ok()?;
+fn parse_package_json_scripts(snapshot: &DirSnapshot, pm: &str) -> Option<Vec<(String, String)>> {
+    let content = snapshot.read_to_string("package.json")?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
     let scripts_obj = json.get("scripts")?.as_object()?;
 
-    let pm = detect_node_pm(path.parent()?);
     let mut result = Vec::new();
 
     for key in ["dev", "start", "build", "test"] {
         if let Some(_val) = scripts_obj.get(key) {
-            let cmd = match pm.as_str() {
+            let cmd = match pm {
                 "pnpm" => format!("pnpm {}", key),
                 "yarn" => format!("yarn {}", key),
                 "bun" => format!("bun run {}", key),
@@ -133,8 +140,8 @@ fn pm_install_cmd(pm: &str) -> String {
 
 // ── Flutter ─────────────────────────────────────────────────────────────
 
-fn detect_flutter_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
-    if !path.join("pubspec.yaml").exists() {
+fn detect_flutter_commands(snapshot: &DirSnapshot, out: &mut Vec<ProjectCommand>) {
+    if !snapshot.has("pubspec.yaml") {
         return;
     }
 
@@ -144,9 +151,9 @@ fn detect_flutter_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
         kind: ProjectCommandKind::Install,
     });
 
-    let has_windows = path.join("windows").exists();
-    let has_web = path.join("web").exists();
-    let has_android = path.join("android").exists();
+    let has_windows = snapshot.has("windows");
+    let has_web = snapshot.has("web");
+    let has_android = snapshot.has("android");
 
     if has_windows {
         out.push(ProjectCommand {
@@ -194,8 +201,8 @@ fn detect_flutter_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
 
 // ── Rust ────────────────────────────────────────────────────────────────
 
-fn detect_rust_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
-    if !path.join("Cargo.toml").exists() {
+fn detect_rust_commands(snapshot: &DirSnapshot, out: &mut Vec<ProjectCommand>) {
+    if !snapshot.has("Cargo.toml") {
         return;
     }
 
@@ -223,8 +230,8 @@ fn detect_rust_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
 
 // ── Go ──────────────────────────────────────────────────────────────────
 
-fn detect_go_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
-    if !path.join("go.mod").exists() {
+fn detect_go_commands(snapshot: &DirSnapshot, out: &mut Vec<ProjectCommand>) {
+    if !snapshot.has("go.mod") {
         return;
     }
 
@@ -247,19 +254,21 @@ fn detect_go_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
 
 // ── Python ──────────────────────────────────────────────────────────────
 
-fn detect_python_commands(path: &Path, stack: &[String], out: &mut Vec<ProjectCommand>) {
-    let has_py = path.join("pyproject.toml").exists()
-        || path.join("requirements.txt").exists()
-        || path.join("Pipfile").exists()
-        || path.join("setup.py").exists()
-        || path.join("manage.py").exists();
+fn detect_python_commands(snapshot: &DirSnapshot, stack: &[String], out: &mut Vec<ProjectCommand>) {
+    let has_py = snapshot.has_any(&[
+        "pyproject.toml",
+        "requirements.txt",
+        "Pipfile",
+        "setup.py",
+        "manage.py",
+    ]);
 
     if !has_py {
         return;
     }
 
     // Django
-    if path.join("manage.py").exists() {
+    if snapshot.has("manage.py") {
         out.push(ProjectCommand {
             label: "runserver".to_string(),
             command: "python manage.py runserver".to_string(),
@@ -286,7 +295,7 @@ fn detect_python_commands(path: &Path, stack: &[String], out: &mut Vec<ProjectCo
     }
 
     // Install deps
-    if path.join("requirements.txt").exists() {
+    if snapshot.has("requirements.txt") {
         out.push(ProjectCommand {
             label: "install".to_string(),
             command: "pip install -r requirements.txt".to_string(),
@@ -295,7 +304,7 @@ fn detect_python_commands(path: &Path, stack: &[String], out: &mut Vec<ProjectCo
     }
 
     // Tests
-    if path.join("pyproject.toml").exists() {
+    if snapshot.has("pyproject.toml") {
         out.push(ProjectCommand {
             label: "test".to_string(),
             command: "pytest".to_string(),
@@ -306,10 +315,9 @@ fn detect_python_commands(path: &Path, stack: &[String], out: &mut Vec<ProjectCo
 
 // ── Docker ──────────────────────────────────────────────────────────────
 
-fn detect_docker_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
-    let has_compose =
-        path.join("docker-compose.yml").exists() || path.join("docker-compose.yaml").exists();
-    let has_dockerfile = path.join("Dockerfile").exists();
+fn detect_docker_commands(snapshot: &DirSnapshot, out: &mut Vec<ProjectCommand>) {
+    let has_compose = snapshot.has("docker-compose.yml") || snapshot.has("docker-compose.yaml");
+    let has_dockerfile = snapshot.has("Dockerfile");
 
     if has_compose {
         out.push(ProjectCommand {
@@ -330,7 +338,11 @@ fn detect_docker_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
     }
 
     if has_dockerfile && !has_compose {
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("app");
+        let name = snapshot
+            .root()
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("app");
         out.push(ProjectCommand {
             label: "build".to_string(),
             command: format!("docker build -t {} .", name),
@@ -341,19 +353,10 @@ fn detect_docker_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
 
 // ── .NET ────────────────────────────────────────────────────────────────
 
-fn detect_dotnet_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
-    let mut has_dotnet = false;
-    if let Ok(entries) = std::fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if let Some(ext) = p.extension() {
-                if ext == "sln" || ext == "csproj" {
-                    has_dotnet = true;
-                    break;
-                }
-            }
-        }
-    }
+fn detect_dotnet_commands(snapshot: &DirSnapshot, out: &mut Vec<ProjectCommand>) {
+    let has_dotnet = snapshot.entries().iter().any(|entry| {
+        entry.is_file && (entry.name.ends_with(".sln") || entry.name.ends_with(".csproj"))
+    });
 
     if !has_dotnet {
         return;
@@ -378,8 +381,8 @@ fn detect_dotnet_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
 
 // ── Java ────────────────────────────────────────────────────────────────
 
-fn detect_java_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
-    if path.join("pom.xml").exists() {
+fn detect_java_commands(snapshot: &DirSnapshot, out: &mut Vec<ProjectCommand>) {
+    if snapshot.has("pom.xml") {
         out.push(ProjectCommand {
             label: "run".to_string(),
             command: "mvn spring-boot:run".to_string(),
@@ -397,10 +400,10 @@ fn detect_java_commands(path: &Path, out: &mut Vec<ProjectCommand>) {
         });
     }
 
-    if path.join("build.gradle").exists() || path.join("build.gradle.kts").exists() {
-        let gradle = if cfg!(target_os = "windows") && path.join("gradlew.bat").exists() {
+    if snapshot.has("build.gradle") || snapshot.has("build.gradle.kts") {
+        let gradle = if cfg!(target_os = "windows") && snapshot.has("gradlew.bat") {
             "gradlew.bat"
-        } else if path.join("gradlew").exists() {
+        } else if snapshot.has("gradlew") {
             "./gradlew"
         } else {
             "gradle"

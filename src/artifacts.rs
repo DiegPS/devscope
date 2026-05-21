@@ -1,8 +1,18 @@
 use std::path::Path;
 
 use crate::project::{ArtifactKind, ProjectArtifact};
+use crate::snapshot::DirSnapshot;
 
+#[allow(dead_code)]
 pub fn detect_artifacts(project_path: &Path, stack: &[String]) -> Vec<ProjectArtifact> {
+    detect_artifacts_with_snapshot(&DirSnapshot::read(project_path), stack)
+}
+
+pub(crate) fn detect_artifacts_with_snapshot(
+    snapshot: &DirSnapshot,
+    stack: &[String],
+) -> Vec<ProjectArtifact> {
+    let project_path = snapshot.root();
     let mut artifacts = Vec::new();
 
     let is_flutter = stack.iter().any(|s| s.contains("Flutter"));

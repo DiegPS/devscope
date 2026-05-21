@@ -11,6 +11,7 @@ use crate::config::{expand_tilde, normalize_path, Config};
 use crate::detect;
 use crate::git;
 use crate::project::{ActivityInfo, DirtyStatus, Project, ProjectStatus};
+use crate::snapshot::DirSnapshot;
 
 /// Directories to skip during scanning.
 pub(crate) const SKIP_DIRS: &[&str] = &[
@@ -140,7 +141,9 @@ pub fn hydrate_git_statuses(projects: &mut [Project]) {
 
 /// Recompute derived health fields after git state changes.
 pub fn recompute_project_health(project: &mut Project) {
-    let health = crate::health::compute_health(
+    let snapshot = DirSnapshot::read(&project.path);
+    let health = crate::health::compute_health_with_snapshot(
+        &snapshot,
         &project.path,
         &project.git,
         project.activity.timestamp,
@@ -298,6 +301,8 @@ fn analyze_project(path: &Path, config: &Config) -> Option<Project> {
         return None;
     }
 
+    let snapshot = DirSnapshot::read(path);
+
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -306,13 +311,13 @@ fn analyze_project(path: &Path, config: &Config) -> Option<Project> {
     let path_str = path.to_string_lossy().to_string();
 
     // Detect stack
-    let stack = detect::detect_stack(path);
+    let stack = detect::detect_stack_with_snapshot(&snapshot);
 
     // Detect package manager
-    let manager = detect::detect_manager(path);
+    let manager = detect::detect_manager_with_snapshot(&snapshot);
 
     // Detect scripts
-    let scripts = detect::detect_scripts(path);
+    let scripts = detect::detect_scripts_with_snapshot(&snapshot);
 
     // Git info (fast — no working tree scan)
     let git_info = if git::is_git_repo(path) {
@@ -322,17 +327,22 @@ fn analyze_project(path: &Path, config: &Config) -> Option<Project> {
     };
 
     // Activity info
-    let activity = calculate_activity(path, &git_info);
+    let activity = calculate_activity(&snapshot, &git_info);
 
     // Detect commands
-    let commands = crate::commands::detect_commands(path, &stack);
+    let commands = crate::commands::detect_commands_with_snapshot(&snapshot, &stack);
 
     // Detect build artifacts
-    let artifacts = crate::artifacts::detect_artifacts(path, &stack);
+    let artifacts = crate::artifacts::detect_artifacts_with_snapshot(&snapshot, &stack);
 
     // Compute health (includes warnings)
-    let health =
-        crate::health::compute_health(path, &git_info, activity.timestamp, !commands.is_empty());
+    let health = crate::health::compute_health_with_snapshot(
+        &snapshot,
+        path,
+        &git_info,
+        activity.timestamp,
+        !commands.is_empty(),
+    );
     let warnings = health.warnings.clone();
 
     // Status (will be overridden by config if set)
@@ -378,9 +388,12 @@ fn hydrate_project_git_status(project: &mut Project) {
 }
 
 /// Calculate activity information for a project.
-fn calculate_activity(path: &Path, git_info: &Option<crate::project::GitInfo>) -> ActivityInfo {
+fn calculate_activity(
+    snapshot: &DirSnapshot,
+    git_info: &Option<crate::project::GitInfo>,
+) -> ActivityInfo {
     // Find the most recent modification time of relevant files
-    let last_modified_ts = find_last_modified(path);
+    let last_modified_ts = find_last_modified(snapshot);
 
     // Use git activity if available
     let last_git_activity_ts = git_info.as_ref().and_then(|g| g.last_commit_timestamp);
@@ -399,7 +412,7 @@ fn calculate_activity(path: &Path, git_info: &Option<crate::project::GitInfo>) -
 }
 
 /// Find the most recent modification time of relevant files in a project.
-fn find_last_modified(path: &Path) -> Option<i64> {
+fn find_last_modified(snapshot: &DirSnapshot) -> Option<i64> {
     let mut latest: Option<std::time::SystemTime> = None;
 
     let relevant_files = [
@@ -418,33 +431,29 @@ fn find_last_modified(path: &Path) -> Option<i64> {
     ];
 
     for file in &relevant_files {
-        let file_path = path.join(file);
-        if let Ok(metadata) = std::fs::metadata(&file_path) {
-            if let Ok(modified) = metadata.modified() {
-                if latest.is_none() || modified > latest.unwrap() {
-                    latest = Some(modified);
-                }
+        if let Some(modified) = snapshot.modified(file) {
+            if latest.is_none() || modified > latest.unwrap() {
+                latest = Some(modified);
             }
         }
     }
 
     // Also check top-level source files
-    if let Ok(entries) = std::fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let file_name = entry.file_name().to_string_lossy().to_string();
-            if file_name.ends_with(".rs")
-                || file_name.ends_with(".js")
-                || file_name.ends_with(".ts")
-                || file_name.ends_with(".py")
-                || file_name.ends_with(".go")
-                || file_name.ends_with(".dart")
-            {
-                if let Ok(metadata) = std::fs::metadata(entry.path()) {
-                    if let Ok(modified) = metadata.modified() {
-                        if latest.is_none() || modified > latest.unwrap() {
-                            latest = Some(modified);
-                        }
-                    }
+    for entry in snapshot.entries() {
+        if !entry.is_file {
+            continue;
+        }
+
+        if entry.name.ends_with(".rs")
+            || entry.name.ends_with(".js")
+            || entry.name.ends_with(".ts")
+            || entry.name.ends_with(".py")
+            || entry.name.ends_with(".go")
+            || entry.name.ends_with(".dart")
+        {
+            if let Some(modified) = entry.modified {
+                if latest.is_none() || modified > latest.unwrap() {
+                    latest = Some(modified);
                 }
             }
         }
