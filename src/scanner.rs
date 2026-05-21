@@ -95,19 +95,31 @@ pub struct ScanResult {
 pub fn scan_roots(config: &Config) -> Result<ScanResult> {
     let start = Instant::now();
 
+    let roots: Vec<PathBuf> = config
+        .active_roots()
+        .iter()
+        .filter_map(|root_str| {
+            let root = normalize_path(&expand_tilde(root_str));
+            if !root.exists() {
+                eprintln!("Warning: root path does not exist: {}", root.display());
+                return None;
+            }
+
+            Some(root)
+        })
+        .collect();
+
+    let root_projects: Vec<Result<Vec<Project>>> = roots
+        .par_iter()
+        .map(|root| scan_single_root(root, config))
+        .collect();
+
     let mut all_projects = Vec::new();
-    let mut visited = HashSet::new();
-
-    for root_str in config.active_roots() {
-        let root = normalize_path(&expand_tilde(root_str));
-        if !root.exists() {
-            eprintln!("Warning: root path does not exist: {}", root.display());
-            continue;
-        }
-
-        let projects = scan_single_root(&root, config, &mut visited)?;
-        all_projects.extend(projects);
+    for projects in root_projects {
+        all_projects.extend(projects?);
     }
+
+    all_projects = dedupe_projects(all_projects);
 
     // Apply user-configured status and notes
     for project in &mut all_projects {
@@ -132,6 +144,19 @@ pub fn scan_roots(config: &Config) -> Result<ScanResult> {
     })
 }
 
+fn dedupe_projects(projects: Vec<Project>) -> Vec<Project> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::with_capacity(projects.len());
+
+    for project in projects {
+        if seen.insert(project.path.clone()) {
+            deduped.push(project);
+        }
+    }
+
+    deduped
+}
+
 /// Rehydrate expensive git working-tree status for already scanned projects.
 /// Intended for CLI flows where correctness matters more than first-paint
 /// latency.
@@ -153,13 +178,10 @@ pub fn recompute_project_health(project: &mut Project) {
     project.health = health;
 }
 
-fn scan_single_root(
-    root: &Path,
-    config: &Config,
-    visited: &mut HashSet<PathBuf>,
-) -> Result<Vec<Project>> {
+fn scan_single_root(root: &Path, config: &Config) -> Result<Vec<Project>> {
     // Check if the root itself is a project
     let mut projects = Vec::new();
+    let mut visited = HashSet::new();
 
     if is_project(root) {
         if let Some(project) = analyze_project(root, config) {
@@ -170,7 +192,7 @@ fn scan_single_root(
     }
 
     // Walk subdirectories
-    let subdirs = collect_subdirs(root, config.max_depth, visited);
+    let subdirs = collect_subdirs(root, config.max_depth, &mut visited);
     let new_projects: Vec<Project> = subdirs
         .par_iter()
         .filter_map(|path| analyze_project(path, config))
