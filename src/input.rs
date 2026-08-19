@@ -263,7 +263,7 @@ fn handle_config_menu(app: &mut App, key: KeyEvent) {
                     app.pending_action = Some(PendingOpenAction {
                         action: a,
                         project_path: config_dir,
-                        project_name: "devscope config".to_string(),
+                        project_name: "ds config".to_string(),
                         artifacts: Vec::new(),
                     });
                     app.mode = Mode::Normal;

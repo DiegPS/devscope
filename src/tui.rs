@@ -243,14 +243,13 @@ fn suspend_and_run(
 }
 
 fn resolve_command(name: &str) -> String {
-    let path = std::path::Path::new(name);
-
     if name.contains('\\') || name.contains('/') {
         return name.to_string();
     }
 
     #[cfg(target_os = "windows")]
     {
+        let path = std::path::Path::new(name);
         let has_ext = path.extension().is_some();
 
         if let Some(paths) = std::env::var_os("PATH") {
@@ -284,7 +283,9 @@ fn record_open(app: &mut App, path: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "windows")]
     use std::fs;
+    #[cfg(target_os = "windows")]
     use tempfile::TempDir;
 
     #[test]

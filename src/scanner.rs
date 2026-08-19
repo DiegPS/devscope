@@ -547,7 +547,7 @@ mod tests {
 
         let tree_id = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
-        let sig = Signature::now("devscope", "devscope@example.com").unwrap();
+        let sig = Signature::now("test", "test@example.com").unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
 

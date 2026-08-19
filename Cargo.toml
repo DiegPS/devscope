@@ -1,4 +1,5 @@
 [package]
+# Keep the package name stable; the installed CLI executable is `ds` below.
 name = "devscope"
 version = "0.1.0"
 edition = "2021"

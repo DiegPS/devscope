@@ -238,7 +238,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                         .map(|value| truncate_end(value, layout.cell_width(&resolved_widths, 5)))
                         .unwrap_or_default();
                     let status_cell = Cell::from(Line::from(Span::styled(
-                        truncate_end(project.status.as_str(), layout.cell_width(&resolved_widths, 3)),
+                        truncate_end(
+                            project.status.as_str(),
+                            layout.cell_width(&resolved_widths, 3),
+                        ),
                         if is_selected { row_style } else { status_style },
                     )));
                     let activity_cell = Cell::from(Line::from(Span::styled(
@@ -314,7 +317,12 @@ impl TableLayout {
     }
 
     fn cell_width(&self, widths: &[usize], index: usize) -> usize {
-        widths.get(index).copied().unwrap_or(1).saturating_sub(1).max(1)
+        widths
+            .get(index)
+            .copied()
+            .unwrap_or(1)
+            .saturating_sub(1)
+            .max(1)
     }
 }
 

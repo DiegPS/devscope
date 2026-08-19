@@ -41,7 +41,7 @@ fn main() -> Result<()> {
             }
             if config.roots.is_empty() && !had_roots {
                 eprintln!(
-                    "No project roots found automatically. Use `devscope add-root <path>` or `devscope discover`."
+                    "No project roots found automatically. Use `ds add-root <path>` or `ds discover`."
                 );
             }
             tui::run_tui(config)?;
@@ -237,7 +237,7 @@ fn cmd_roots() -> Result<()> {
     let config = config::load_config()?;
 
     if config.roots.is_empty() {
-        println!("No roots configured. Use 'devscope add-root <path>' to add one.");
+        println!("No roots configured. Use 'ds add-root <path>' to add one.");
         return Ok(());
     }
 
@@ -310,7 +310,7 @@ fn cmd_discover(apply: bool) -> Result<()> {
     if discovered.is_empty() {
         println!("No project roots found in common locations.");
         println!("Try:");
-        println!("  devscope add-root \"C:\\path\\to\\your\\projects\"");
+        println!("  ds add-root \"C:\\path\\to\\your\\projects\"");
         return Ok(());
     }
 
@@ -325,7 +325,7 @@ fn cmd_discover(apply: bool) -> Result<()> {
     }
 
     if !apply {
-        println!("\nRun `devscope discover --apply` to add these roots.");
+        println!("\nRun `ds discover --apply` to add these roots.");
         return Ok(());
     }
 
@@ -460,19 +460,19 @@ mod tests {
 
     #[test]
     fn temporary_root_arg_accepts_dot() {
-        let args = vec!["devscope".to_string(), ".".to_string()];
+        let args = vec!["ds".to_string(), ".".to_string()];
         assert_eq!(temporary_root_arg(&args), Some(".".to_string()));
     }
 
     #[test]
     fn temporary_root_arg_rejects_known_subcommands() {
-        let args = vec!["devscope".to_string(), "scan".to_string()];
+        let args = vec!["ds".to_string(), "scan".to_string()];
         assert_eq!(temporary_root_arg(&args), None);
     }
 
     #[test]
     fn temporary_root_arg_accepts_path_like_values() {
-        let args = vec!["devscope".to_string(), "./projects".to_string()];
+        let args = vec!["ds".to_string(), "./projects".to_string()];
         assert_eq!(temporary_root_arg(&args), Some("./projects".to_string()));
     }
 
@@ -491,9 +491,9 @@ mod tests {
         assert_eq!(updated.roots, config.roots);
         assert_eq!(
             updated.session_roots,
-            Some(vec![
-                config::normalize_path(dir.path()).to_string_lossy().to_string()
-            ])
+            Some(vec![config::normalize_path(dir.path())
+                .to_string_lossy()
+                .to_string()])
         );
         assert_eq!(updated.max_depth, 7);
     }

@@ -64,13 +64,13 @@ fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, them
     if area.width < 92 {
         let compact = if let Some(ref msg) = app.status_message {
             Line::from(vec![
-                Span::styled(" devscope ", theme.title),
+                Span::styled(" ds ", theme.title),
                 Span::styled("· ", theme.dim),
                 Span::styled(msg.as_str(), theme.active),
             ])
         } else {
             Line::from(vec![
-                Span::styled(" devscope ", theme.title),
+                Span::styled(" ds ", theme.title),
                 Span::styled(format!("{} ", app.filtered_count()), theme.count),
                 Span::styled("/ ", theme.dim),
                 Span::styled(format!("{} ", app.total_projects), theme.muted),
@@ -89,13 +89,13 @@ fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, them
 
     let title = if let Some(ref msg) = app.status_message {
         Line::from(vec![
-            Span::styled(" devscope ", theme.title),
+            Span::styled(" ds ", theme.title),
             Span::styled("· ", theme.dim),
             Span::styled(msg.as_str(), theme.active),
         ])
     } else {
         Line::from(vec![
-            Span::styled(" devscope ", theme.title),
+            Span::styled(" ds ", theme.title),
             Span::styled("· ", theme.dim),
             Span::styled(format!("{}", app.total_projects), theme.count),
             Span::styled(" projects ", theme.muted),

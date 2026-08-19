@@ -1,6 +1,6 @@
-# devscope
+# ds
 
-`devscope` is a fast local project scanner plus terminal dashboard for developers.
+`ds` is a fast local project scanner plus terminal dashboard for developers.
 
 It is built for the case where you have many folders, many repos, mixed stacks, and you want one place to answer:
 
@@ -12,7 +12,7 @@ It is built for the case where you have many folders, many repos, mixed stacks, 
 
 ## What it can do
 
-`devscope` can:
+`ds` can:
 
 - scan one or more root folders and discover projects automatically
 - detect stacks, frameworks, package managers, scripts, commands, artifacts, Git state, activity, notes, health, and ports
@@ -43,52 +43,62 @@ Each detected project becomes a `Project` model with data such as:
 Run the TUI:
 
 ```bash
-devscope
+ds
 ```
 
 Add a root and scan it:
 
 ```bash
-devscope add-root C:\Users\me\projects
-devscope scan
+ds add-root C:\Users\me\projects
+ds scan
 ```
 
 List everything as JSON:
 
 ```bash
-devscope list --json
+ds list --json
 ```
 
 Annotate a project:
 
 ```bash
-devscope note devscope "Needs perf review"
-devscope status devscope active
+ds note my-project "Needs perf review"
+ds status my-project active
 ```
 
-If no roots are configured, `devscope` can auto-discover likely roots on first run.
+If no roots are configured, `ds` can auto-discover likely roots on first run.
+
+### Install
+
+From the repository root, install the executable with Cargo:
+
+```bash
+cargo install --path .
+```
+
+The package metadata remains `devscope` for source compatibility, but the installed executable is `ds`.
 
 ## CLI reference
 
 Run without a subcommand to launch the TUI:
 
 ```bash
-devscope
+ds
 ```
 
 Available commands:
 
 ```text
-devscope scan
-devscope list [--json]
-devscope add-root <path>
-devscope remove-root <path>
-devscope roots
-devscope note <project> <text>
-devscope status <project> <active|paused|stale|archived>
-devscope config [--edit]
-devscope open <project>
-devscope discover [--apply]
+ds scan
+ds list [--json]
+ds add-root <path>
+ds remove-root <path>
+ds roots
+ds note <project> <text>
+ds status <project> <active|paused|stale|archived>
+ds config [--edit]
+ds open <project>
+ds discover [--apply]
 ```
 
 ### Command behavior
@@ -157,7 +167,7 @@ Resolution tries path first when the input looks like a path, then exact name, t
 
 ## TUI
 
-The TUI is where `devscope` is strongest.
+The TUI is where `ds` is strongest.
 
 It supports:
 
@@ -247,7 +257,7 @@ In narrow terminals, detailed view switches to a vertical split automatically.
 
 ## Project discovery and scanning
 
-`devscope` walks configured roots and treats a directory as a project when it finds a recognized marker file.
+`ds` walks configured roots and treats a directory as a project when it finds a recognized marker file.
 
 Markers include:
 
@@ -311,7 +321,7 @@ The scanner skips heavy or noisy directories such as:
 
 ## Stack and framework detection
 
-`devscope` can infer:
+`ds` can infer:
 
 - Flutter/Dart and platform folders for Windows, Android, iOS, Web, Linux, macOS
 - Node and frameworks/tools like React, Vue, Svelte, Next.js, Nuxt, Vite, Tailwind, Electron, Tauri, Express, Fastify, Angular, TypeScript
@@ -330,7 +340,7 @@ The scanner skips heavy or noisy directories such as:
 
 ## Suggested commands
 
-`devscope` does not run project commands automatically, but it can suggest likely commands based on stack and files.
+`ds` does not run project commands automatically, but it can suggest likely commands based on stack and files.
 
 Examples:
 
@@ -345,7 +355,7 @@ Examples:
 
 ## Git support
 
-For Git repos, `devscope` reads:
+For Git repos, `ds` reads:
 
 - current branch
 - last commit hash, message, date, and timestamp
@@ -363,7 +373,7 @@ CLI `scan` and `list` hydrate Git status before printing so their output stays c
 
 ## Activity
 
-`devscope` computes activity from project file timestamps plus Git commit timestamps when available.
+`ds` computes activity from project file timestamps plus Git commit timestamps when available.
 
 That activity feeds:
 
@@ -431,7 +441,7 @@ Artifact detection currently includes:
 
 ## Ports
 
-`devscope` can detect listening TCP ports that belong to running project processes.
+`ds` can detect listening TCP ports that belong to running project processes.
 
 How it works:
 
@@ -448,6 +458,8 @@ Config lives at:
 
 - Windows: `%APPDATA%/devscope/config.toml`
 - Linux/macOS: the platform config directory from `directories::ProjectDirs`
+
+The `devscope` storage identifier is retained so existing configuration continues to work; the executable and user-facing name are `ds`.
 
 Important top-level fields:
 
@@ -467,10 +479,10 @@ right_panel = true
 default = "cursor"
 
 [project_status]
-"C:\\Users\\me\\projects\\devscope" = "active"
+"C:\\Users\\me\\projects\\my-project" = "active"
 
 [notes]
-"C:\\Users\\me\\projects\\devscope" = "Needs perf review"
+"C:\\Users\\me\\projects\\my-project" = "Needs perf review"
 ```
 
 ### Open actions
@@ -540,7 +552,7 @@ Notes, statuses, and usage scores are persisted in config.
 
 ## Discovery
 
-`devscope discover` looks for likely root folders under common developer locations such as:
+`ds discover` looks for likely root folders under common developer locations such as:
 
 - `~/dev`
 - `~/projects`
@@ -557,7 +569,7 @@ Each candidate gets a confidence level like `HIGH`, `MEDIUM`, or `LOW`.
 Use:
 
 ```bash
-devscope discover --apply
+ds discover --apply
 ```
 
 to add discovered roots into config.

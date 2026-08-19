@@ -163,6 +163,8 @@ impl Config {
 }
 
 pub fn config_dir() -> Result<PathBuf> {
+    // Keep the storage identifier for compatibility with existing user config;
+    // the installed command and user-facing application name are `ds`.
     let dirs =
         ProjectDirs::from("", "", "devscope").context("Could not determine config directory")?;
     Ok(dirs.config_dir().to_path_buf())
@@ -200,22 +202,19 @@ pub fn normalize_path(path: &std::path::Path) -> PathBuf {
     let mut components = Vec::new();
     for component in path.components() {
         match component {
-            std::path::Component::ParentDir => {
-                match components.last().copied() {
-                    Some(std::path::Component::Normal(_)) => {
-                        components.pop();
-                    }
-                    Some(std::path::Component::CurDir) => {
-                        components.pop();
-                        components.push(component);
-                    }
-                    Some(std::path::Component::ParentDir) | None => {
-                        components.push(component);
-                    }
-                    Some(std::path::Component::RootDir)
-                    | Some(std::path::Component::Prefix(_)) => {}
+            std::path::Component::ParentDir => match components.last().copied() {
+                Some(std::path::Component::Normal(_)) => {
+                    components.pop();
                 }
-            }
+                Some(std::path::Component::CurDir) => {
+                    components.pop();
+                    components.push(component);
+                }
+                Some(std::path::Component::ParentDir) | None => {
+                    components.push(component);
+                }
+                Some(std::path::Component::RootDir) | Some(std::path::Component::Prefix(_)) => {}
+            },
             std::path::Component::CurDir => {}
             other => components.push(other),
         }
@@ -226,77 +225,6 @@ pub fn normalize_path(path: &std::path::Path) -> PathBuf {
         PathBuf::from(".")
     } else {
         normalized
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{normalize_path, Config};
-    use std::path::Path;
-
-    #[test]
-    fn normalize_path_keeps_current_directory_when_components_collapse() {
-        let dot = normalize_path(Path::new("."));
-        assert_eq!(dot.display().to_string(), ".");
-        assert!(!dot.as_os_str().is_empty());
-
-        let collapsed = normalize_path(Path::new("a/.."));
-        assert_eq!(collapsed.display().to_string(), ".");
-        assert!(!collapsed.as_os_str().is_empty());
-    }
-
-    #[test]
-    fn normalize_path_preserves_leading_parent_components() {
-        assert_eq!(normalize_path(Path::new("..")), Path::new(".."));
-        assert_eq!(normalize_path(Path::new("../projects")), Path::new("../projects"));
-        assert_eq!(
-            normalize_path(Path::new("..\\projects")),
-            Path::new("..\\projects")
-        );
-    }
-
-    #[test]
-    fn normalize_path_collapses_children_before_parent_components() {
-        assert_eq!(normalize_path(Path::new("a/b/../c")), Path::new("a/c"));
-        assert_eq!(normalize_path(Path::new("a/../../b")), Path::new("../b"));
-    }
-
-    #[test]
-    fn active_roots_uses_session_override_without_mutating_roots() {
-        let config = Config {
-            roots: vec!["C:\\projects".to_string(), "D:\\work".to_string()],
-            session_roots: Some(vec!["C:\\temp-only".to_string()]),
-            ..Config::default()
-        };
-
-        assert_eq!(config.active_roots(), &["C:\\temp-only".to_string()]);
-        assert_eq!(
-            config.roots,
-            vec!["C:\\projects".to_string(), "D:\\work".to_string()]
-        );
-    }
-
-    #[test]
-    fn session_roots_are_not_serialized() {
-        let config = Config {
-            roots: vec!["C:\\projects".to_string()],
-            session_roots: Some(vec!["C:\\temp-only".to_string()]),
-            ..Config::default()
-        };
-
-        let toml = toml::to_string(&config).unwrap();
-        let parsed: toml::Value = toml::from_str(&toml).unwrap();
-
-        assert_eq!(
-            parsed
-                .get("roots")
-                .and_then(|roots| roots.as_array())
-                .and_then(|roots| roots.first())
-                .and_then(|root| root.as_str()),
-            Some("C:\\projects")
-        );
-        assert!(parsed.get("session_roots").is_none());
-        assert!(!toml.contains("temp-only"));
     }
 }
 
@@ -522,4 +450,78 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
     });
 
     actions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_path, Config};
+    use std::path::Path;
+
+    #[test]
+    fn normalize_path_keeps_current_directory_when_components_collapse() {
+        let dot = normalize_path(Path::new("."));
+        assert_eq!(dot.display().to_string(), ".");
+        assert!(!dot.as_os_str().is_empty());
+
+        let collapsed = normalize_path(Path::new("a/.."));
+        assert_eq!(collapsed.display().to_string(), ".");
+        assert!(!collapsed.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn normalize_path_preserves_leading_parent_components() {
+        assert_eq!(normalize_path(Path::new("..")), Path::new(".."));
+        assert_eq!(
+            normalize_path(Path::new("../projects")),
+            Path::new("../projects")
+        );
+        assert_eq!(
+            normalize_path(Path::new("..\\projects")),
+            Path::new("..\\projects")
+        );
+    }
+
+    #[test]
+    fn normalize_path_collapses_children_before_parent_components() {
+        assert_eq!(normalize_path(Path::new("a/b/../c")), Path::new("a/c"));
+        assert_eq!(normalize_path(Path::new("a/../../b")), Path::new("../b"));
+    }
+
+    #[test]
+    fn active_roots_uses_session_override_without_mutating_roots() {
+        let config = Config {
+            roots: vec!["C:\\projects".to_string(), "D:\\work".to_string()],
+            session_roots: Some(vec!["C:\\temp-only".to_string()]),
+            ..Config::default()
+        };
+
+        assert_eq!(config.active_roots(), &["C:\\temp-only".to_string()]);
+        assert_eq!(
+            config.roots,
+            vec!["C:\\projects".to_string(), "D:\\work".to_string()]
+        );
+    }
+
+    #[test]
+    fn session_roots_are_not_serialized() {
+        let config = Config {
+            roots: vec!["C:\\projects".to_string()],
+            session_roots: Some(vec!["C:\\temp-only".to_string()]),
+            ..Config::default()
+        };
+
+        let toml = toml::to_string(&config).unwrap();
+        let parsed: toml::Value = toml::from_str(&toml).unwrap();
+
+        assert_eq!(
+            parsed
+                .get("roots")
+                .and_then(|roots| roots.as_array())
+                .and_then(|roots| roots.first())
+                .and_then(|root| root.as_str()),
+            Some("C:\\projects")
+        );
+        assert!(parsed.get("session_roots").is_none());
+        assert!(!toml.contains("temp-only"));
+    }
 }

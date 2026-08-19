@@ -1,8 +1,9 @@
 # AGENTS.md
 
 ## Build & Test
+- The installed CLI executable is `ds` (`cargo install --path .`), while the Cargo package remains `devscope` for source compatibility.
 - `cargo check` — fast compile check (no warnings expected)
-- `cargo test` — runs all 42 unit tests (~0.2s after compile)
+- `cargo test` — runs all 56 unit tests (~0.2s after compile)
 - `cargo build` — release/debug build
 - `cargo clippy` — linting (no custom clippy.toml)
 
@@ -19,7 +20,7 @@ Entrypoint: `src/main.rs` — if no subcommand, loads config + launches TUI.
 Key modules:
 - `scanner.rs` — walks root dirs (up to `max_depth`, default 4), detects projects via 28 marker files, uses `rayon` for parallel analysis
 - `detect.rs` — tech stack detection from config files (Rust, Node, Python, Go, Flutter, Docker, .NET, Java, etc.)
-- `config.rs` — TOML config at platform config dir (e.g. `%APPDATA%/devscope/config.toml` on Windows, `~/.config/devscope/config.toml` on Linux)
+- `config.rs` — TOML config at platform config dir (e.g. `%APPDATA%/devscope/config.toml` on Windows, `~/.config/devscope/config.toml` on Linux); the storage identifier remains `devscope` for compatibility with existing configs.
 - `project.rs` — data models: `Project`, `GitInfo`, `ProjectStatus`, `ProjectWarning`, `HealthLevel`
 - `health.rs` — health score 0-100, deductions for missing README, dirty git, env files, etc.
 - `app.rs` — TUI state: filters, sorts, search, view modes
