@@ -209,9 +209,11 @@ fn decode_windows_command_line(bytes: &[u8]) -> Option<String> {
     }
     let content = bytes.get(offset..offset.checked_add(length)?)?;
     let wide: Vec<u16> = content
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .take(4096)
-        .map(|pair| u16::from_ne_bytes([pair[0], pair[1]]))
+        .map(|pair| u16::from_ne_bytes(*pair))
         .collect();
     Some(String::from_utf16_lossy(&wide))
 }
@@ -378,7 +380,12 @@ mod tests {
         let wide: Vec<u16> = text.encode_utf16().collect();
         let header_len = std::mem::size_of::<CommandLineHeader>();
         let mut bytes = vec![0u8; header_len + wide.len() * 2];
-        for (pair, value) in bytes[header_len..].chunks_exact_mut(2).zip(&wide) {
+        for (pair, value) in bytes[header_len..]
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
+            .zip(&wide)
+        {
             pair.copy_from_slice(&value.to_ne_bytes());
         }
         let header = CommandLineHeader {

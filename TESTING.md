@@ -49,7 +49,7 @@ El script recoge unit tests, integración CLI y sesiones PTY instrumentadas en u
 
 El gate inicial es **75 % de líneas**. Se excluyen los archivos de pruebas independientes del informe; las pruebas inline dentro de módulos Rust siguen en las estadísticas de LLVM. Por ello el porcentaje representa los archivos instrumentados reportados, no una medida exacta aislada de producción. No se presume cobertura de ramas, cobertura de código C/libgit2 ni ausencia de defectos. El informe por archivo identifica dónde falta trabajo, especialmente lanzamientos externos, errores de terminal y autodiscovery del entorno.
 
-La medición preliminar local fue 77,7 % antes de la última ampliación de casos Git/UI; el informe generado es la referencia para el porcentaje de cada commit.
+La medición local con la ampliación Git/UI fue **81,26 % de líneas** (4.769 de 5.869), incluyendo las sesiones PTY instrumentadas. El informe generado es la referencia para el porcentaje de cada commit.
 
 ## Automatización de GitHub
 
