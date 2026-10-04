@@ -247,17 +247,102 @@ pub fn load_config() -> Result<Config> {
 
 pub fn save_config(config: &Config) -> Result<()> {
     let path = config_path()?;
+    save_config_at(config, &path)
+}
+
+pub(crate) fn save_config_at(config: &Config, path: &Path) -> Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    // Preserve an existing config symlink rather than replacing the link itself.
+    let resolved = if path.is_symlink() {
+        Some(std::fs::canonicalize(path).context("Failed to resolve config symlink")?)
+    } else {
+        None
+    };
+    let path = resolved.as_deref().unwrap_or(path);
+    let content = toml::to_string_pretty(config).context("Failed to serialize config")?;
+    if std::fs::metadata(path).is_ok_and(|metadata| metadata.permissions().readonly()) {
+        anyhow::bail!("Config is read-only: {}", path.display());
+    }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create config dir at {}", parent.display()))?;
     }
 
-    let content = toml::to_string_pretty(config).context("Failed to serialize config")?;
-
-    std::fs::write(&path, content)
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let file_name = path.file_name().context("Config path has no file name")?;
+    let (temporary, mut file) = loop {
+        let mut name = file_name.to_os_string();
+        name.push(format!(
+            ".{}.{}.tmp",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let temporary = parent.join(name);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&temporary) {
+            Ok(file) => break (temporary, file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("Failed to prepare config at {}", path.display()))
+            }
+        }
+    };
+    let cleanup = TemporaryConfig(temporary);
+    if let Ok(metadata) = std::fs::metadata(path) {
+        file.set_permissions(metadata.permissions())?;
+    }
+    file.write_all(content.as_bytes())
         .with_context(|| format!("Failed to write config at {}", path.display()))?;
-
+    file.sync_all().context("Failed to flush config")?;
+    drop(file);
+    replace_config(&cleanup.0, path)
+        .with_context(|| format!("Failed to replace config at {}", path.display()))?;
     Ok(())
+}
+
+struct TemporaryConfig(PathBuf);
+
+impl Drop for TemporaryConfig {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_config(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::fs::rename(source, destination)
+}
+
+#[cfg(windows)]
+fn replace_config(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn MoveFileExW(source: *const u16, destination: *const u16, flags: u32) -> i32;
+    }
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    // SAFETY: both buffers are owned, NUL-terminated UTF-16 paths and remain
+    // alive throughout the call. The temporary is on the same filesystem.
+    if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), 0x1 | 0x8) } == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 pub fn get_project_status(config: &Config, path: &str) -> Option<ProjectStatus> {
@@ -330,7 +415,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
             key: "c".to_string(),
             name: "cursor".to_string(),
             command: Some("cursor".to_string()),
-            args: vec![".".to_string()],
+            args: vec!["{path}".to_string()],
             current_dir: false,
             terminal_mode: false,
             env: std::collections::HashMap::new(),
@@ -340,7 +425,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
             key: "v".to_string(),
             name: "vscode".to_string(),
             command: Some("code".to_string()),
-            args: vec![".".to_string()],
+            args: vec!["{path}".to_string()],
             current_dir: false,
             terminal_mode: false,
             env: std::collections::HashMap::new(),
@@ -456,6 +541,46 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
 mod tests {
     use super::{normalize_path, Config};
     use std::path::Path;
+
+    #[test]
+    fn config_replacement_round_trips_and_leaves_no_temporary_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut config = Config::default();
+        super::save_config_at(&config, &path).unwrap();
+        config.notes.insert("project".into(), "saved note".into());
+        super::save_config_at(&config, &path).unwrap();
+        let saved: Config = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved.notes, config.notes);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_replacement_preserves_existing_target_and_cleans_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("keep"), "original").unwrap();
+        assert!(super::save_config_at(&Config::default(), &path).is_err());
+        assert_eq!(
+            std::fs::read_to_string(path.join("keep")).unwrap(),
+            "original"
+        );
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn config_replacement_preserves_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("actual.toml");
+        let link = dir.path().join("config.toml");
+        std::fs::write(&target, "").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        super::save_config_at(&Config::default(), &link).unwrap();
+        assert!(link.is_symlink());
+        assert!(toml::from_str::<Config>(&std::fs::read_to_string(target).unwrap()).is_ok());
+    }
 
     #[test]
     fn normalize_path_keeps_current_directory_when_components_collapse() {

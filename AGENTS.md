@@ -3,7 +3,7 @@
 ## Build & Test
 - The installed CLI executable is `ds` (`cargo install --path .`), while the Cargo package remains `devscope` for source compatibility.
 - `cargo check` — fast compile check (no warnings expected)
-- `cargo test` — runs all 56 unit tests (~0.2s after compile)
+- `cargo test` — runs the unit and regression tests (~0.2s after compile; count varies by platform)
 - `cargo build` — release/debug build
 - `cargo clippy` — linting (no custom clippy.toml)
 

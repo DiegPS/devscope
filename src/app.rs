@@ -65,8 +65,8 @@ impl SortField {
         }
     }
 
-    pub fn all() -> Vec<Self> {
-        vec![
+    pub fn all() -> &'static [Self] {
+        &[
             Self::Activity,
             Self::Name,
             Self::Stack,
@@ -116,8 +116,8 @@ impl FilterField {
         }
     }
 
-    pub fn all() -> Vec<Self> {
-        vec![
+    pub fn all() -> &'static [Self] {
+        &[
             Self::All,
             Self::Active,
             Self::Dirty,
@@ -156,6 +156,7 @@ pub struct App {
     pub scan_duration_ms: u128,
     pub total_projects: usize,
     pub note_input: String,
+    pub editing_project_id: Option<String>,
     pub status_options: Vec<ProjectStatus>,
     pub status_selected: usize,
     pub help_scroll: usize,
@@ -167,6 +168,8 @@ pub struct App {
     pub ports_rx: Option<mpsc::Receiver<HashMap<String, Vec<u16>>>>,
     hydration_generation: u64,
     hydration_result_rx: Option<mpsc::Receiver<HydrationResult>>,
+    #[cfg(test)]
+    pub config_save_path: Option<PathBuf>,
 }
 
 impl App {
@@ -183,6 +186,7 @@ impl App {
             scan_duration_ms: 0,
             total_projects: 0,
             note_input: String::new(),
+            editing_project_id: None,
             status_options: vec![
                 ProjectStatus::Active,
                 ProjectStatus::Paused,
@@ -199,6 +203,8 @@ impl App {
             ports_rx: None,
             hydration_generation: 0,
             hydration_result_rx: None,
+            #[cfg(test)]
+            config_save_path: None,
         };
         app.reload();
 
@@ -248,6 +254,7 @@ impl App {
     }
 
     fn spawn_port_detection(&mut self) {
+        self.ports_rx = None;
         let paths: Vec<String> = self
             .projects
             .iter()
@@ -265,6 +272,7 @@ impl App {
     }
 
     pub fn apply_filter_and_sort(&mut self) {
+        let selected_id = self.selected_project().map(|project| project.id.clone());
         let mut indices: Vec<usize> = self
             .projects
             .iter()
@@ -282,9 +290,16 @@ impl App {
 
         self.filtered_indices = indices;
 
-        if self.selected >= self.filtered_indices.len() && !self.filtered_indices.is_empty() {
-            self.selected = self.filtered_indices.len() - 1;
-        }
+        self.selected = selected_id
+            .and_then(|id| {
+                self.filtered_indices
+                    .iter()
+                    .position(|&i| self.projects[i].id == id)
+            })
+            .unwrap_or_else(|| {
+                self.selected
+                    .min(self.filtered_indices.len().saturating_sub(1))
+            });
     }
 
     fn matches_filter(&self, project: &Project) -> bool {
@@ -339,9 +354,9 @@ impl App {
             }
             SortField::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
             SortField::Stack => {
-                let sa = a.stack.first().cloned().unwrap_or_default();
-                let sb = b.stack.first().cloned().unwrap_or_default();
-                sa.cmp(&sb)
+                let sa = a.stack.first().map(String::as_str).unwrap_or_default();
+                let sb = b.stack.first().map(String::as_str).unwrap_or_default();
+                sa.cmp(sb)
             }
             SortField::Status => a.status.as_str().cmp(b.status.as_str()),
             SortField::DirtyFirst => {
@@ -377,12 +392,7 @@ impl App {
     pub fn selected_project(&self) -> Option<&Project> {
         self.filtered_indices
             .get(self.selected)
-            .map(|&i| &self.projects[i])
-    }
-
-    pub fn selected_project_mut(&mut self) -> Option<&mut Project> {
-        let idx = self.filtered_indices.get(self.selected).copied()?;
-        Some(&mut self.projects[idx])
+            .and_then(|&i| self.projects.get(i))
     }
 
     pub fn move_up(&mut self) {
@@ -530,11 +540,24 @@ impl App {
         changed
     }
 
-    pub fn prioritize_selected(&mut self) {}
-
-    pub fn selected_path_str(&self) -> Option<String> {
-        self.selected_project()
-            .map(|p| p.path.to_string_lossy().to_string())
+    pub fn persist_config(&mut self, updated: Config) -> bool {
+        #[cfg(test)]
+        let result = match self.config_save_path.as_ref() {
+            Some(path) => crate::config::save_config_at(&updated, path),
+            None => crate::config::save_config(&updated),
+        };
+        #[cfg(not(test))]
+        let result = crate::config::save_config(&updated);
+        match result {
+            Ok(()) => {
+                self.config = updated;
+                true
+            }
+            Err(error) => {
+                self.status_message = Some(format!("Could not save config: {error:#}"));
+                false
+            }
+        }
     }
 }
 

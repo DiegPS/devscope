@@ -41,13 +41,15 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             app.reload();
         }
         KeyCode::Char('n') if app.selected_project().is_some() => {
+            app.editing_project_id = app.selected_project().map(|p| p.id.clone());
             app.mode = Mode::EditingNote;
             app.note_input = app
                 .selected_project()
                 .and_then(|p| p.note.clone())
                 .unwrap_or_default();
         }
-        KeyCode::Char('m') => {
+        KeyCode::Char('m') if app.selected_project().is_some() => {
+            app.editing_project_id = app.selected_project().map(|p| p.id.clone());
             app.mode = Mode::ChangingStatus;
             if let Some(project) = app.selected_project() {
                 app.status_selected = app
@@ -85,8 +87,11 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => {
             let project_id = app.selected_project().map(|p| p.id.clone());
             if let Some(ref id) = project_id {
-                crate::config::record_visit(&mut app.config, id);
-                let _ = crate::config::save_config(&app.config);
+                let mut updated = app.config.clone();
+                crate::config::record_visit(&mut updated, id);
+                if app.persist_config(updated) {
+                    app.apply_filter_and_sort();
+                }
             }
         }
         _ => {}
@@ -120,27 +125,27 @@ fn handle_note_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Esc => {
             app.mode = Mode::Normal;
             app.note_input.clear();
+            app.editing_project_id = None;
         }
         KeyCode::Enter => {
-            let path_str = app.selected_path_str();
             let note_val = app.note_input.clone();
-            if let Some(path_str) = path_str {
+            if let Some(index) = editing_project_index(app) {
+                let path_str = app.projects[index].path.to_string_lossy().to_string();
+                let mut updated = app.config.clone();
                 if note_val.is_empty() {
-                    app.config.notes.remove(&path_str);
+                    updated.notes.remove(&path_str);
                 } else {
-                    crate::config::set_note(&mut app.config, &path_str, note_val.clone());
+                    crate::config::set_note(&mut updated, &path_str, note_val.clone());
                 }
-                let _ = crate::config::save_config(&app.config);
-                if let Some(p) = app.selected_project_mut() {
-                    p.note = if note_val.is_empty() {
-                        None
-                    } else {
-                        Some(note_val)
-                    };
+                if !app.persist_config(updated) {
+                    return;
                 }
+                app.projects[index].note = (!note_val.is_empty()).then_some(note_val);
+                app.apply_filter_and_sort();
             }
             app.mode = Mode::Normal;
             app.note_input.clear();
+            app.editing_project_id = None;
         }
         KeyCode::Backspace => {
             app.note_input.pop();
@@ -156,6 +161,7 @@ fn handle_status_mode(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             app.mode = Mode::Normal;
+            app.editing_project_id = None;
         }
         KeyCode::Up | KeyCode::Char('k') if app.status_selected > 0 => {
             app.status_selected -= 1;
@@ -166,19 +172,35 @@ fn handle_status_mode(app: &mut App, key: KeyEvent) {
             app.status_selected += 1;
         }
         KeyCode::Enter => {
-            let path_str = app.selected_path_str();
-            if let Some(path_str) = path_str {
-                let new_status = app.status_options[app.status_selected].clone();
-                crate::config::set_project_status(&mut app.config, &path_str, new_status.clone());
-                let _ = crate::config::save_config(&app.config);
-                if let Some(p) = app.selected_project_mut() {
-                    p.status = new_status;
+            if let Some(index) = editing_project_index(app) {
+                let Some(new_status) = app.status_options.get(app.status_selected).cloned() else {
+                    return;
+                };
+                let path_str = app.projects[index].path.to_string_lossy().to_string();
+                let mut updated = app.config.clone();
+                crate::config::set_project_status(&mut updated, &path_str, new_status.clone());
+                if !app.persist_config(updated) {
+                    return;
                 }
+                app.projects[index].status = new_status;
+                app.apply_filter_and_sort();
             }
             app.mode = Mode::Normal;
+            app.editing_project_id = None;
         }
         _ => {}
     }
+}
+
+fn editing_project_index(app: &mut App) -> Option<usize> {
+    let index = app
+        .editing_project_id
+        .as_ref()
+        .and_then(|id| app.projects.iter().position(|project| &project.id == id));
+    if index.is_none() {
+        app.status_message = Some("The project being edited is no longer available".to_string());
+    }
+    index
 }
 
 fn handle_help_mode(app: &mut App, key: KeyEvent) {
@@ -276,5 +298,149 @@ fn handle_config_menu(app: &mut App, key: KeyEvent) {
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        app::{FilterField, SortField},
+        config::Config,
+        project::DirtyStatus,
+    };
+    use crossterm::event::KeyModifiers;
+
+    fn fixture() -> (tempfile::TempDir, App) {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["alpha", "beta"] {
+            let path = dir.path().join(name);
+            std::fs::create_dir(&path).unwrap();
+            std::fs::write(
+                path.join("Cargo.toml"),
+                "[package]\nname='test'\nversion='0.1.0'\n",
+            )
+            .unwrap();
+            git2::Repository::init(&path).unwrap();
+        }
+        let config = Config {
+            roots: vec![dir.path().to_string_lossy().into()],
+            ..Config::default()
+        };
+        let mut app = App::new(Config::default());
+        app.projects = crate::scanner::scan_roots(&config).unwrap().projects;
+        app.config = config;
+        app.config_save_path = Some(dir.path().join("config.toml"));
+        app.sort = SortField::Name;
+        app.apply_filter_and_sort();
+        (dir, app)
+    }
+
+    fn key(app: &mut App, code: KeyCode) {
+        handle_key_event(app, KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn note_keeps_original_target_after_reordering_and_selection_changes() {
+        let (dir, mut app) = fixture();
+        let alpha = app.selected_project().unwrap().id.clone();
+        key(&mut app, KeyCode::Char('n'));
+        app.note_input = "alpha note".into();
+        app.sort = SortField::DirtyFirst;
+        for project in &mut app.projects {
+            project.git.as_mut().unwrap().dirty_status = if project.name == "beta" {
+                DirtyStatus::Dirty
+            } else {
+                DirtyStatus::Clean
+            };
+        }
+        app.apply_filter_and_sort();
+        assert_eq!(app.selected_project().unwrap().id, alpha);
+        app.selected = 0; // Even a later selection change must not redirect the edit.
+        assert_eq!(app.selected_project().unwrap().name, "beta");
+        key(&mut app, KeyCode::Enter);
+        let saved: Config =
+            toml::from_str(&std::fs::read_to_string(dir.path().join("config.toml")).unwrap())
+                .unwrap();
+        assert_eq!(
+            saved.notes.get(&alpha).map(String::as_str),
+            Some("alpha note")
+        );
+        assert_eq!(saved.notes.len(), 1);
+        assert_eq!(
+            app.projects
+                .iter()
+                .find(|p| p.name == "alpha")
+                .unwrap()
+                .note
+                .as_deref(),
+            Some("alpha note")
+        );
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn failed_note_save_preserves_draft_and_previous_state() {
+        let (dir, mut app) = fixture();
+        let blocked = dir.path().join("blocked");
+        std::fs::create_dir(&blocked).unwrap();
+        app.config_save_path = Some(blocked);
+        key(&mut app, KeyCode::Char('n'));
+        app.note_input = "unsaved note".into();
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(app.mode, Mode::EditingNote);
+        assert_eq!(app.note_input, "unsaved note");
+        assert!(app.config.notes.is_empty());
+        assert!(app.selected_project().unwrap().note.is_none());
+        assert!(app
+            .status_message
+            .as_deref()
+            .unwrap()
+            .contains("Could not save"));
+    }
+
+    #[test]
+    fn missing_edit_target_cannot_save_to_another_project() {
+        let (dir, mut app) = fixture();
+        key(&mut app, KeyCode::Char('n'));
+        let target = app.editing_project_id.clone().unwrap();
+        app.projects.retain(|p| p.id != target);
+        app.apply_filter_and_sort();
+        app.note_input = "do not redirect".into();
+        key(&mut app, KeyCode::Enter);
+        assert!(!dir.path().join("config.toml").exists());
+        assert!(app.config.notes.is_empty());
+    }
+
+    #[test]
+    fn status_change_updates_the_active_filter() {
+        let (_dir, mut app) = fixture();
+        for project in &mut app.projects {
+            project.status = crate::project::ProjectStatus::Active;
+        }
+        app.filter = FilterField::Active;
+        app.apply_filter_and_sort();
+        key(&mut app, KeyCode::Char('m'));
+        app.status_selected = 3;
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(app.filtered_count(), 1);
+        assert_eq!(app.selected_project().unwrap().name, "beta");
+        assert!(app
+            .projects
+            .iter()
+            .any(|p| p.name == "alpha" && p.status == crate::project::ProjectStatus::Archived));
+    }
+
+    #[test]
+    fn deleting_a_note_updates_the_notes_filter() {
+        let (_dir, mut app) = fixture();
+        app.projects[0].note = Some("old".into());
+        app.filter = FilterField::WithNotes;
+        app.apply_filter_and_sort();
+        key(&mut app, KeyCode::Char('n'));
+        app.note_input.clear();
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(app.filtered_count(), 0);
+        assert_eq!(app.selected, 0);
     }
 }

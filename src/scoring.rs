@@ -140,7 +140,7 @@ pub fn compute_score(name: &str, query: &str, entry: &ScoreEntry) -> f64 {
 
 /// Score based purely on frequency + recency (no search query active).
 fn frecency_score(entry: &ScoreEntry) -> f64 {
-    let total = (entry.visits + entry.opens) as f64;
+    let total = f64::from(entry.visits) + f64::from(entry.opens);
     let usage_bonus = if total > 0.0 { (1.0 + total).ln() } else { 0.0 };
     let recency_bonus = recency_bonus(entry);
     usage_bonus + recency_bonus
@@ -156,7 +156,7 @@ fn recency_bonus(entry: &ScoreEntry) -> f64 {
         .unwrap_or_default()
         .as_secs() as i64;
 
-    let age_hours = (now - last_used) as f64 / 3600.0;
+    let age_hours = now.saturating_sub(last_used) as f64 / 3600.0;
 
     if age_hours < 1.0 {
         1.0
@@ -168,5 +168,21 @@ fn recency_bonus(entry: &ScoreEntry) -> f64 {
         0.2
     } else {
         0.05
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn extreme_saved_counters_and_timestamp_keep_scores_finite() {
+        let entry = ScoreEntry {
+            visits: u32::MAX,
+            opens: u32::MAX,
+            last_used: Some(i64::MIN),
+        };
+        let score = compute_score("project", "", &entry);
+        assert!(score.is_finite());
+        assert!(score > 0.0);
     }
 }

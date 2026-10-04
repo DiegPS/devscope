@@ -240,9 +240,16 @@ pub fn count_projects_under(root: &Path, max_depth: usize) -> Result<usize> {
 /// Returns ranked results: by project count (desc), then confidence, then path.
 pub fn discover_roots(config: &Config) -> Result<Vec<DiscoveredRoot>> {
     let candidates = default_candidate_roots();
+    discover_from_candidates(config, &candidates)
+}
+
+fn discover_from_candidates(
+    config: &Config,
+    candidates: &[PathBuf],
+) -> Result<Vec<DiscoveredRoot>> {
     let mut results = Vec::new();
 
-    for candidate in &candidates {
+    for candidate in candidates {
         let depth = if is_high_confidence_path(candidate) {
             config.max_depth.max(4)
         } else {
@@ -386,24 +393,28 @@ mod tests {
     }
 
     #[test]
-    fn discover_does_not_panic_on_empty_config() {
+    fn discover_handles_empty_candidates() {
         let config = Config::default();
-        let result = discover_roots(&config);
-        assert!(result.is_ok());
+        assert!(discover_from_candidates(&config, &[]).unwrap().is_empty());
     }
 
     #[test]
-    fn default_candidate_roots_includes_home_dev() {
-        let roots = default_candidate_roots();
-        // HOME variable is always set in tests
-        if let Some(home) = dirs_home() {
-            let dev_path = home.join("dev");
-            if dev_path.exists() && dev_path.is_dir() {
-                assert!(roots
-                    .iter()
-                    .any(|r| { normalize_for_compare(r) == normalize_for_compare(&dev_path) }));
-            }
+    fn discover_counts_only_the_supplied_fixture_candidates() {
+        let dir = tempfile::tempdir().unwrap();
+        let projects = dir.path().join("projects");
+        let empty = dir.path().join("empty");
+        fs::create_dir(&empty).unwrap();
+        for name in ["first", "second"] {
+            let project = projects.join(name);
+            fs::create_dir_all(&project).unwrap();
+            fs::write(project.join("Cargo.toml"), "[package]").unwrap();
         }
+        let results =
+            discover_from_candidates(&Config::default(), &[empty, projects.clone()]).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, projects);
+        assert_eq!(results[0].project_count, 2);
+        assert_eq!(results[0].confidence, DiscoveryConfidence::High);
     }
 
     #[test]

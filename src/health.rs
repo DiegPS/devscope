@@ -104,8 +104,10 @@ pub(crate) fn compute_health_with_snapshot(
         if git_info.dirty_status == DirtyStatus::Dirty {
             score -= 12;
             warnings.push(ProjectWarning::DirtyWorkingTree);
-            let total =
-                git_info.modified_count.unwrap_or(0) + git_info.untracked_count.unwrap_or(0);
+            let total = git_info
+                .modified_count
+                .unwrap_or(0)
+                .saturating_add(git_info.untracked_count.unwrap_or(0));
             if total > 10 {
                 score -= 8;
                 warnings.push(ProjectWarning::ManyUncommittedChanges(total));
@@ -142,7 +144,7 @@ pub(crate) fn compute_health_with_snapshot(
         // Stale branch detection via commit date
         if let Some(ts) = activity_timestamp {
             let now = chrono::Utc::now().timestamp();
-            let days = (now - ts) / 86400;
+            let days = now.saturating_sub(ts) / 86400;
             if days > 90 {
                 score -= 10;
                 warnings.push(ProjectWarning::StaleBranch);
@@ -155,7 +157,7 @@ pub(crate) fn compute_health_with_snapshot(
         // Activity staleness (only if not a git repo, since git staleness is handled above)
         if let Some(ts) = activity_timestamp {
             let now = chrono::Utc::now().timestamp();
-            let days = (now - ts) / 86400;
+            let days = now.saturating_sub(ts) / 86400;
             if days > 90 {
                 score -= 10;
                 warnings.push(ProjectWarning::LowActivity);
@@ -172,17 +174,21 @@ pub(crate) fn compute_health_with_snapshot(
     // Clamp score
     let score = score.clamp(0, 100) as u8;
 
-    let level = match score {
-        0..=49 => HealthLevel::Bad,
-        50..=79 => HealthLevel::Warn,
-        _ => HealthLevel::Good,
-    };
+    let level = health_level(score);
 
     ProjectHealth {
         score,
         level,
         positives,
         warnings,
+    }
+}
+
+fn health_level(score: u8) -> HealthLevel {
+    match score {
+        0..=49 => HealthLevel::Bad,
+        50..=79 => HealthLevel::Warn,
+        _ => HealthLevel::Good,
     }
 }
 
@@ -340,17 +346,43 @@ mod tests {
 
     #[test]
     fn health_level_mapping() {
-        assert_eq!(compute_score_level(90), HealthLevel::Good);
-        assert_eq!(compute_score_level(70), HealthLevel::Warn);
-        assert_eq!(compute_score_level(40), HealthLevel::Bad);
+        for (score, expected) in [
+            (0, HealthLevel::Bad),
+            (49, HealthLevel::Bad),
+            (50, HealthLevel::Warn),
+            (79, HealthLevel::Warn),
+            (80, HealthLevel::Good),
+            (100, HealthLevel::Good),
+        ] {
+            assert_eq!(health_level(score), expected);
+        }
     }
 
-    fn compute_score_level(s: u8) -> HealthLevel {
-        match s {
-            0..=49 => HealthLevel::Bad,
-            50..=79 => HealthLevel::Warn,
-            _ => HealthLevel::Good,
+    #[test]
+    fn extreme_activity_timestamps_do_not_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+        for timestamp in [i64::MIN, i64::MAX] {
+            let health = compute_health(dir.path(), &None, Some(timestamp), false);
+            assert_eq!(
+                health.warnings.contains(&ProjectWarning::LowActivity),
+                timestamp == i64::MIN
+            );
         }
+    }
+
+    #[test]
+    fn extreme_git_counts_and_timestamp_do_not_overflow() {
+        let dir = tempfile::tempdir().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        let mut git = crate::git::get_git_info_fast(dir.path()).unwrap();
+        git.dirty_status = DirtyStatus::Dirty;
+        git.modified_count = Some(usize::MAX);
+        git.untracked_count = Some(1);
+        let health = compute_health(dir.path(), &Some(git), Some(i64::MIN), false);
+        assert!(health
+            .warnings
+            .contains(&ProjectWarning::ManyUncommittedChanges(usize::MAX)));
+        assert!(health.warnings.contains(&ProjectWarning::StaleBranch));
     }
 
     #[test]

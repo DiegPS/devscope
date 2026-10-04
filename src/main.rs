@@ -293,7 +293,7 @@ fn cmd_open(project: String) -> Result<()> {
     let resolved = find_project_path(&config, &project)?;
 
     config::record_open(&mut config, &resolved);
-    let _ = config::save_config(&config);
+    config::save_config(&config)?;
 
     // MVP: just print the path
     println!("{}", resolved);

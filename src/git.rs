@@ -41,7 +41,7 @@ pub fn get_git_info_fast(repo_path: &Path) -> Result<GitInfo> {
 /// Compute the dirty status (expensive — scans working tree).
 pub fn get_git_status(repo_path: &Path) -> Result<(DirtyStatus, Option<usize>, Option<usize>)> {
     let repo = Repository::open(repo_path)?;
-    let (modified, untracked) = get_working_tree_status(&repo);
+    let (modified, untracked) = get_working_tree_status(&repo)?;
 
     let status = if modified > 0 || untracked > 0 {
         DirtyStatus::Dirty
@@ -140,16 +140,13 @@ fn get_last_commit_info(repo: &Repository) -> (String, String, String, Option<i6
     (hash, message, date, Some(timestamp))
 }
 
-fn get_working_tree_status(repo: &Repository) -> (usize, usize) {
+fn get_working_tree_status(repo: &Repository) -> Result<(usize, usize)> {
     let mut opts = StatusOptions::new();
     opts.include_untracked(true);
     opts.include_ignored(false);
     opts.renames_from_rewrites(false);
 
-    let statuses = match repo.statuses(Some(&mut opts)) {
-        Ok(statuses) => statuses,
-        Err(_) => return (0, 0),
-    };
+    let statuses = repo.statuses(Some(&mut opts))?;
 
     let mut modified = 0;
     let mut untracked = 0;
@@ -157,6 +154,8 @@ fn get_working_tree_status(repo: &Repository) -> (usize, usize) {
     for entry in statuses.iter() {
         let status = entry.status();
         if status.is_wt_modified()
+            || status.is_index_new()
+            || status.is_conflicted()
             || status.is_index_modified()
             || status.is_wt_deleted()
             || status.is_index_deleted()
@@ -172,7 +171,7 @@ fn get_working_tree_status(repo: &Repository) -> (usize, usize) {
         }
     }
 
-    (modified, untracked)
+    Ok((modified, untracked))
 }
 
 fn get_remote_url(repo: &Repository) -> Option<String> {
@@ -250,4 +249,31 @@ pub fn is_git_repo(path: &Path) -> bool {
 /// Check if a branch name is a mainline branch.
 pub fn is_mainline_branch(branch: &str) -> bool {
     matches!(branch, "main" | "master" | "develop" | "dev")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn staged_additions_are_dirty_and_counted_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join("new.txt"), "new").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("new.txt")).unwrap();
+        index.write().unwrap();
+        assert_eq!(
+            get_git_status(dir.path()).unwrap(),
+            (DirtyStatus::Dirty, Some(1), Some(0))
+        );
+    }
+
+    #[test]
+    fn status_errors_are_not_reported_as_clean() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init_bare(dir.path()).unwrap();
+        assert!(get_working_tree_status(&repo).is_err());
+        assert!(get_git_status(dir.path()).is_err());
+    }
 }

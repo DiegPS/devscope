@@ -18,44 +18,49 @@ use crate::input;
 use crate::ui;
 
 pub fn run_tui(config: Config) -> Result<()> {
+    let mut app = App::new(config);
     enable_raw_mode()?;
+    let _guard = TerminalGuard;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(config);
+    run_loop(&mut terminal, &mut app)
+}
 
-    let result = run_loop(&mut terminal, &mut app);
+struct TerminalGuard;
 
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-    disable_raw_mode()?;
-
-    result
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        // Each restoration is attempted even when another operation fails.
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
+    }
 }
 
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> Result<()> {
-    let mut prev_selected = app.selected;
-
     loop {
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         if let Some(ref rx) = app.ports_rx {
-            if let Ok(port_map) = rx.try_recv() {
-                for project in &mut app.projects {
-                    let path_str = project.path.to_string_lossy().to_string();
-                    if let Some(ports) = port_map.get(&path_str) {
-                        project.ports = ports.clone();
+            match rx.try_recv() {
+                Ok(port_map) => {
+                    for project in &mut app.projects {
+                        let path_str = project.path.to_string_lossy().to_string();
+                        if let Some(ports) = port_map.get(&path_str) {
+                            project.ports = ports.clone();
+                        }
                     }
+                    app.ports_rx = None;
                 }
-                app.ports_rx = None;
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => app.ports_rx = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
             }
         }
 
         if app.needs_reload {
             app.reload();
-            prev_selected = app.selected;
         }
 
         if app.should_quit {
@@ -65,11 +70,6 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
         if let Some(pending) = app.pending_action.take() {
             execute_open_action(&pending, app);
             terminal.clear()?;
-        }
-
-        if app.selected != prev_selected {
-            prev_selected = app.selected;
-            app.prioritize_selected();
         }
 
         app.poll_hydration_results();
@@ -102,12 +102,12 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
                 match open::that(path) {
                     Ok(()) => {
                         app.status_message = Some(format!("Opened folder: {}", name));
+                        record_open(app, path);
                     }
                     Err(e) => {
                         app.status_message = Some(format!("Could not open folder. {}", e));
                     }
                 }
-                record_open(app, path);
                 return;
             }
             OpenActionKind::BuildOutput => {
@@ -115,7 +115,13 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
                     .iter()
                     .find(|a| a.exists && a.kind != crate::project::ArtifactKind::Executable)
                     .or_else(|| artifacts.iter().find(|a| a.exists));
-                let target = artifact.map(|a| a.path.parent().unwrap_or(&a.path));
+                let target = artifact.map(|a| {
+                    if a.path.is_dir() {
+                        a.path.as_path()
+                    } else {
+                        a.path.parent().unwrap_or(&a.path)
+                    }
+                });
                 match target {
                     Some(t) if t.exists() => {
                         if let Err(e) = open::that(t) {
@@ -123,6 +129,7 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
                                 Some(format!("Could not open build output. {}", e));
                         } else {
                             app.status_message = Some(format!("Opened build output: {}", name));
+                            record_open(app, path);
                         }
                     }
                     Some(_) => {
@@ -134,7 +141,6 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
                             Some("No artifacts detected. Run a build first.".to_string());
                     }
                 }
-                record_open(app, path);
                 return;
             }
             OpenActionKind::Executable => {
@@ -152,6 +158,7 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
                             app.status_message = Some(format!("Could not open executable. {}", e));
                         } else {
                             app.status_message = Some(format!("Opened executable: {}", name));
+                            record_open(app, path);
                         }
                     }
                     None => {
@@ -159,7 +166,6 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
                             Some("No executable found. Run a build first.".to_string());
                     }
                 }
-                record_open(app, path);
                 return;
             }
             _ => {}
@@ -174,14 +180,26 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
     let resolved = resolve_command(command);
     let args = action.resolve_args(path, name);
 
-    if action.terminal_mode {
-        record_open(app, path);
-        suspend_and_run(&resolved, &args, action.current_dir, path, &action.env);
+    let opened = if action.terminal_mode {
+        match suspend_and_run(&resolved, &args, action.current_dir, path, &action.env) {
+            Ok(status) if status.success() => true,
+            Ok(status) => {
+                app.status_message = Some(format!("{} exited with {}", action.name, status));
+                false
+            }
+            Err(error) => {
+                app.status_message = Some(format!("Could not open {}: {error:#}", action.name));
+                false
+            }
+        }
         // Force full redraw by telling terminal to clear on next frame if possible,
         // but crossterm clear in suspend_and_run handles it.
     } else {
         let mut cmd = Command::new(&resolved);
         cmd.args(&args);
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         if action.current_dir {
             cmd.current_dir(path);
         }
@@ -189,19 +207,26 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
             cmd.env(k, v);
         }
         match cmd.spawn() {
-            Ok(_child) => {
+            Ok(mut child) => {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
                 app.status_message = Some(format!("Opened {}: {}", action.name, name));
+                true
             }
             Err(e) => {
                 app.status_message = Some(format!(
                     "Could not open {}. Check config or PATH. ({})",
                     action.name, e
                 ));
+                false
             }
         }
-    }
+    };
 
-    record_open(app, path);
+    if opened {
+        record_open(app, path);
+    }
 }
 
 fn suspend_and_run(
@@ -210,16 +235,17 @@ fn suspend_and_run(
     use_current_dir: bool,
     path: &std::path::Path,
     env: &std::collections::HashMap<String, String>,
-) {
+) -> Result<std::process::ExitStatus> {
     // Release any stdout lock
     drop(io::stdout().lock());
 
     let mut stdout = io::stdout();
 
     // 1. Suspend TUI
-    let _ = execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show,);
-    let _ = stdout.flush();
-    let _ = disable_raw_mode();
+    let mut resume = ResumeTerminal(true);
+    execute!(stdout, LeaveAlternateScreen, crossterm::cursor::Show)?;
+    stdout.flush()?;
+    disable_raw_mode()?;
 
     // 2. Run the command synchronously
     let mut cmd = Command::new(resolved);
@@ -234,12 +260,34 @@ fn suspend_and_run(
     cmd.stdout(Stdio::inherit());
     cmd.stderr(Stdio::inherit());
 
-    let _ = cmd.status();
+    let result = cmd.status();
 
     // 3. Resume TUI
-    let _ = enable_raw_mode();
-    let _ = execute!(stdout, EnterAlternateScreen, Clear(ClearType::All));
-    let _ = stdout.flush();
+    resume.restore()?;
+    Ok(result?)
+}
+
+struct ResumeTerminal(bool);
+
+impl ResumeTerminal {
+    fn restore(&mut self) -> Result<()> {
+        let raw = enable_raw_mode();
+        let screen = execute!(io::stdout(), EnterAlternateScreen, Clear(ClearType::All));
+        let flush = io::stdout().flush();
+        raw?;
+        screen?;
+        flush?;
+        self.0 = false;
+        Ok(())
+    }
+}
+
+impl Drop for ResumeTerminal {
+    fn drop(&mut self) {
+        if self.0 {
+            let _ = self.restore();
+        }
+    }
 }
 
 fn resolve_command(name: &str) -> String {
@@ -249,35 +297,48 @@ fn resolve_command(name: &str) -> String {
 
     #[cfg(target_os = "windows")]
     {
-        let path = std::path::Path::new(name);
-        let has_ext = path.extension().is_some();
-
         if let Some(paths) = std::env::var_os("PATH") {
-            for dir in std::env::split_paths(&paths) {
-                if has_ext {
-                    let candidate = dir.join(name);
-                    if candidate.is_file() {
-                        return candidate.to_string_lossy().to_string();
-                    }
-                } else {
-                    for ext in [".exe", ".com", ".cmd", ".bat"] {
-                        let candidate = dir.join(format!("{}{}", name, ext));
-                        if candidate.is_file() {
-                            return candidate.to_string_lossy().to_string();
-                        }
-                    }
-                }
-            }
+            return resolve_command_from_paths(
+                name,
+                &std::env::split_paths(&paths).collect::<Vec<_>>(),
+            );
         }
     }
 
     name.to_string()
 }
 
+#[cfg(windows)]
+fn resolve_command_from_paths(name: &str, paths: &[std::path::PathBuf]) -> String {
+    if name.contains('\\') || name.contains('/') {
+        return name.to_string();
+    }
+    let has_ext = std::path::Path::new(name).extension().is_some();
+    for dir in paths {
+        if has_ext {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return candidate.to_string_lossy().to_string();
+            }
+        } else {
+            for ext in [".exe", ".com", ".cmd", ".bat"] {
+                let candidate = dir.join(format!("{}{}", name, ext));
+                if candidate.is_file() {
+                    return candidate.to_string_lossy().to_string();
+                }
+            }
+        }
+    }
+    name.to_string()
+}
+
 fn record_open(app: &mut App, path: &std::path::Path) {
     let path_str = path.to_string_lossy().to_string();
-    crate::config::record_open(&mut app.config, &path_str);
-    let _ = crate::config::save_config(&app.config);
+    let mut updated = app.config.clone();
+    crate::config::record_open(&mut updated, &path_str);
+    if app.persist_config(updated) {
+        app.apply_filter_and_sort();
+    }
 }
 
 #[cfg(test)]
@@ -298,10 +359,7 @@ mod tests {
         fs::write(dir.join("opencode"), "").unwrap();
         fs::write(dir.join("opencode.cmd"), "").unwrap();
 
-        let old_path = std::env::var("PATH").ok();
-        std::env::set_var("PATH", format!("{};", dir.display()));
-
-        let result = resolve_command("opencode");
+        let result = resolve_command_from_paths("opencode", &[dir.to_path_buf()]);
         let resolved = std::path::Path::new(&result);
         assert!(
             resolved.extension().is_some(),
@@ -318,10 +376,6 @@ mod tests {
             "should resolve .cmd, got: {}",
             result
         );
-
-        if let Some(p) = old_path {
-            std::env::set_var("PATH", p);
-        }
     }
 
     #[test]
@@ -333,18 +387,11 @@ mod tests {
         // Only bare file, no extension variants
         fs::write(dir.join("mytool"), "").unwrap();
 
-        let old_path = std::env::var("PATH").ok();
-        std::env::set_var("PATH", format!("{};", dir.display()));
-
-        let result = resolve_command("mytool");
+        let result = resolve_command_from_paths("mytool", &[dir.to_path_buf()]);
         assert_eq!(
             result, "mytool",
             "should not return bare file without extension"
         );
-
-        if let Some(p) = old_path {
-            std::env::set_var("PATH", p);
-        }
     }
 
     #[test]
@@ -355,19 +402,12 @@ mod tests {
 
         fs::write(dir.join("tool.cmd"), "").unwrap();
 
-        let old_path = std::env::var("PATH").ok();
-        std::env::set_var("PATH", format!("{};", dir.display()));
-
-        let result = resolve_command("tool.cmd");
+        let result = resolve_command_from_paths("tool.cmd", &[dir.to_path_buf()]);
         assert!(
             result.ends_with("tool.cmd"),
             "should resolve tool.cmd as-is, got: {}",
             result
         );
-
-        if let Some(p) = old_path {
-            std::env::set_var("PATH", p);
-        }
     }
 
     #[test]
@@ -382,14 +422,10 @@ mod tests {
     #[test]
     fn bare_name_fallback() {
         // When nothing is found in PATH, return original name
-        let old_path = std::env::var("PATH").ok();
-        std::env::set_var("PATH", "");
-
+        #[cfg(windows)]
+        let result = resolve_command_from_paths("nonexistent-tool-xyz", &[]);
+        #[cfg(not(windows))]
         let result = resolve_command("nonexistent-tool-xyz");
         assert_eq!(result, "nonexistent-tool-xyz");
-
-        if let Some(p) = old_path {
-            std::env::set_var("PATH", p);
-        }
     }
 }
