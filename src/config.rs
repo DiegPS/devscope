@@ -171,7 +171,31 @@ pub fn config_dir() -> Result<PathBuf> {
 }
 
 pub fn config_path() -> Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = TEST_CONFIG_PATH.with(|path| path.borrow().clone()) {
+        return Ok(path);
+    }
     Ok(config_dir()?.join("config.toml"))
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_CONFIG_PATH: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only, thread-local injection. It cannot redirect production binaries,
+/// does not mutate process environment, and restores its scope during unwind.
+#[cfg(test)]
+pub(crate) fn with_test_config_path<T>(path: PathBuf, test: impl FnOnce() -> T) -> T {
+    struct Restore(Option<PathBuf>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_CONFIG_PATH.with(|path| *path.borrow_mut() = self.0.take());
+        }
+    }
+    let previous = TEST_CONFIG_PATH.with(|current| current.replace(Some(path)));
+    let _restore = Restore(previous);
+    test()
 }
 
 pub fn expand_tilde(path: &str) -> PathBuf {

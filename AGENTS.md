@@ -6,8 +6,11 @@
 - `cargo test` — runs the unit and regression tests (~0.2s after compile; count varies by platform)
 - `cargo build` — release/debug build
 - `cargo clippy` — linting (no custom clippy.toml)
+- `cargo test --locked --all-targets` — unit, regression and executable CLI tests
+- `python scripts/test_tui.py` — real PTY lifecycle scenarios; uses a test-only child and isolated config
+- `python scripts/coverage.py --minimum-lines 75` — unit/CLI/PTY LLVM coverage (requires cargo-llvm-cov 0.9.1 + llvm-tools-preview)
 
-No CI, no pre-commit hooks, no rustfmt.toml.
+GitHub Actions checks Windows/Linux/macOS and publishes Windows coverage. See TESTING.md for scope and limitations. No pre-commit hooks, no rustfmt.toml.
 
 ## PowerShell caveat
 `cargo` prints progress to stderr. In PowerShell, do NOT use `2>&1` with cargo — it triggers `NativeCommandError` red text even on success. Chain commands with `;` and check `$LASTEXITCODE`:

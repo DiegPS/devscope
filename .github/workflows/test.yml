@@ -1,0 +1,59 @@
+name: Rust quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install stable toolchain
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - name: Format
+        run: cargo +stable fmt --all -- --check
+      - name: Lints
+        run: cargo +stable clippy --locked --all-targets -- -D warnings
+      - name: Tests
+        run: cargo +stable test --locked --all-targets
+      - name: Real terminal lifecycle
+        run: python scripts/test_tui.py
+      - name: Release build
+        run: cargo +stable build --locked --release
+
+  coverage:
+    name: Coverage (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install coverage toolchain
+        run: rustup toolchain install stable --profile minimal --component llvm-tools-preview
+      - name: Install coverage tooling
+        run: cargo +stable install cargo-llvm-cov --version 0.9.1 --locked
+      - name: Measure coverage
+        run: python scripts/coverage.py --minimum-lines 75
+      - name: Upload coverage report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-coverage
+          path: target/coverage
+          if-no-files-found: error

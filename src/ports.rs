@@ -304,6 +304,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn malformed_process_buffers_never_require_dereferencing_foreign_addresses() {
+        let mut state = 0x1234_5678u32;
+        for length in 0..128 {
+            for _ in 0..8 {
+                let bytes: Vec<u8> = (0..length)
+                    .map(|_| {
+                        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                        (state >> 24) as u8
+                    })
+                    .collect();
+                let _ = decode_windows_command_line(&bytes);
+                let _ = parse_macos_command_line(&bytes);
+            }
+        }
+    }
+
+    #[test]
     fn listeners_share_command_queries_and_do_not_cache_across_scans() {
         let paths = vec!["/work/app".into(), "/work/app/child".into()];
         let mut calls = HashMap::new();
@@ -395,8 +412,8 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
-    fn windows_can_read_its_own_process_command_line() {
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    fn native_can_read_its_own_process_command_line() {
         let command = get_process_cmd(std::process::id()).unwrap();
         let exe = std::env::current_exe().unwrap();
         assert!(command.contains(exe.file_name().unwrap().to_str().unwrap()));

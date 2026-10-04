@@ -1,0 +1,1030 @@
+//! Cross-module contracts: filesystem -> model -> input -> persistence -> UI.
+//! All writable state belongs to fixtures; no personal config or global env.
+use std::{fs, path::Path};
+
+use clap::Parser;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::{backend::TestBackend, Terminal};
+
+use crate::{
+    app::{App, FilterField, Mode, SortField, ViewMode},
+    config::{self, Config},
+    project::{ArtifactKind, DirtyStatus, Project, ProjectStatus},
+    scanner, scoring,
+    snapshot::DirSnapshot,
+};
+
+fn write(root: &Path, name: &str, content: &str) {
+    let path = root.join(name);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, content).unwrap();
+}
+
+fn fixture() -> (tempfile::TempDir, App) {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["alpha", "beta", "gamma"] {
+        write(
+            dir.path(),
+            &format!("{name}/Cargo.toml"),
+            "[package]\nname='demo'\nversion='0.1.0'\n",
+        );
+    }
+    let config = Config {
+        roots: vec![dir.path().to_string_lossy().into_owned()],
+        ..Config::default()
+    };
+    // Construct without starting background network/process or Git workers.
+    let mut app = App::new(Config::default());
+    app.projects = scanner::scan_roots(&config).unwrap().projects;
+    app.projects.sort_by(|a, b| a.name.cmp(&b.name));
+    app.total_projects = app.projects.len();
+    app.config = config;
+    app.config_save_path = Some(dir.path().join("saved.toml"));
+    app.sort = SortField::Name;
+    app.apply_filter_and_sort();
+    (dir, app)
+}
+
+fn key(app: &mut App, code: KeyCode) {
+    crate::input::handle_key_event(app, KeyEvent::new(code, KeyModifiers::NONE));
+}
+
+fn names(app: &App) -> Vec<&str> {
+    app.filtered_indices
+        .iter()
+        .map(|&i| app.projects[i].name.as_str())
+        .collect()
+}
+
+fn render(app: &App, width: u16, height: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| crate::ui::draw(frame, app)).unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect()
+}
+
+#[test]
+fn config_defaults_accept_old_minimal_files_and_unknown_fields() {
+    let config: Config = toml::from_str("roots=[]\nfuture_option=true\n").unwrap();
+    assert_eq!(config.max_depth, 4);
+    assert!(config.notes.is_empty());
+    assert!(config.scores.is_empty());
+    assert!(!config.open.actions.is_empty());
+    assert!(toml::from_str::<Config>("max_depth='wrong'").is_err());
+    assert!(toml::from_str::<Config>("notes=[]").is_err());
+}
+
+#[test]
+fn config_round_trip_preserves_unicode_notes_statuses_scores_and_custom_actions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested/config.toml");
+    let mut config = Config {
+        roots: vec!["/work/Proyecto 日本".into()],
+        ..Config::default()
+    };
+    config::set_note(&mut config, "project", "línea 1\n日本 🦀\n\"quote\"".into());
+    config::set_project_status(&mut config, "project", ProjectStatus::Paused);
+    config::record_visit(&mut config, "project");
+    config::record_open(&mut config, "project");
+    config.open.actions[0].args = vec!["{path}".into(), "--name={name}".into()];
+    config::save_config_at(&config, &path).unwrap();
+    let loaded: Config = toml::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(loaded.roots, config.roots);
+    assert_eq!(loaded.notes, config.notes);
+    assert_eq!(
+        config::get_project_status(&loaded, "project"),
+        Some(ProjectStatus::Paused)
+    );
+    assert_eq!(loaded.scores["project"].visits, 1);
+    assert_eq!(loaded.scores["project"].opens, 1);
+    assert_eq!(loaded.open.actions[0].args, config.open.actions[0].args);
+}
+
+#[test]
+fn readonly_config_failure_preserves_contents_and_does_not_leave_temporary_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "roots=[]\n").unwrap();
+    let original_permissions = fs::metadata(&path).unwrap().permissions();
+    let mut readonly = original_permissions.clone();
+    readonly.set_readonly(true);
+    fs::set_permissions(&path, readonly).unwrap();
+    let result = config::save_config_at(&Config::default(), &path);
+    // Restore before assertions so TempDir can remove the fixture on Windows.
+    fs::set_permissions(&path, original_permissions).unwrap();
+    assert!(result.is_err());
+    assert_eq!(fs::read_to_string(path).unwrap(), "roots=[]\n");
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn counters_saturate_independently_without_losing_other_projects() {
+    let mut config = Config::default();
+    config.scores.insert(
+        "full".into(),
+        scoring::ScoreEntry {
+            visits: u32::MAX,
+            opens: u32::MAX,
+            last_used: None,
+        },
+    );
+    config::record_visit(&mut config, "full");
+    config::record_open(&mut config, "full");
+    config::record_open(&mut config, "other");
+    assert_eq!(config.scores["full"].visits, u32::MAX);
+    assert_eq!(config.scores["full"].opens, u32::MAX);
+    assert!(config.scores["full"].last_used.is_some());
+    assert_eq!(config.scores["other"].opens, 1);
+    assert_eq!(config.scores["other"].visits, 0);
+}
+
+#[test]
+fn action_arguments_preserve_spaces_quotes_unicode_and_shell_metacharacters() {
+    let mut action = Config::default().open.actions.remove(0);
+    action.args = vec![
+        "{path}".into(),
+        "--name={name}".into(),
+        "$HOME; literal".into(),
+    ];
+    let path = Path::new("/work/my project 🦀");
+    assert_eq!(
+        action.resolve_args(path, "quoted \"name\""),
+        vec![
+            "/work/my project 🦀",
+            "--name=quoted \"name\"",
+            "$HOME; literal"
+        ]
+    );
+}
+
+#[test]
+fn snapshot_distinguishes_files_directories_and_missing_content() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "README.md", "hello");
+    fs::create_dir(dir.path().join("src")).unwrap();
+    let snapshot = DirSnapshot::read(dir.path());
+    assert!(snapshot.has_any(&["missing", "README.md"]));
+    assert!(snapshot
+        .entries()
+        .iter()
+        .any(|e| e.name == "README.md" && e.is_file));
+    assert!(snapshot
+        .entries()
+        .iter()
+        .any(|e| e.name == "src" && !e.is_file));
+    assert_eq!(
+        snapshot.read_to_string("README.md").as_deref(),
+        Some("hello")
+    );
+    assert!(snapshot.read_to_string("missing").is_none());
+    assert!(snapshot.read_to_string("src").is_none());
+    assert!(DirSnapshot::read(&dir.path().join("absent"))
+        .entries()
+        .is_empty());
+}
+
+#[test]
+fn stack_detection_covers_supported_marker_families() {
+    for (marker, content, expected) in [
+        ("Cargo.toml", "[package]\nname='demo'", "Rust"),
+        ("package.json", "{}", "Node"),
+        ("go.mod", "module example.test/app", "Go"),
+        ("requirements.txt", "", "Python"),
+        ("pubspec.yaml", "name: demo", "Flutter/Dart"),
+        ("Dockerfile", "FROM scratch", "Docker"),
+        ("pom.xml", "<project/>", "Java"),
+        ("Gemfile", "", "Ruby"),
+        ("Package.swift", "", "Swift"),
+        ("deno.json", "{}", "Deno"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), marker, content);
+        assert!(
+            crate::detect::detect_stack(dir.path())
+                .iter()
+                .any(|s| s == expected),
+            "{marker}: {expected}"
+        );
+    }
+}
+
+#[test]
+fn node_frameworks_manager_and_scripts_are_detected_together() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "package.json",
+        r#"{"dependencies":{"react":"*","next":"*"},"scripts":{"dev":"next dev","test":"test","custom":"echo custom"}}"#,
+    );
+    write(dir.path(), "pnpm-lock.yaml", "");
+    let stack = crate::detect::detect_stack(dir.path());
+    for expected in ["Node", "React", "Next.js"] {
+        assert!(stack.iter().any(|s| s == expected));
+    }
+    assert_eq!(
+        crate::detect::detect_manager(dir.path()).as_deref(),
+        Some("pnpm")
+    );
+    let scripts = crate::detect::detect_scripts(dir.path());
+    assert_eq!(scripts, vec!["custom", "dev", "test"]);
+    let commands = crate::commands::detect_commands(dir.path(), &stack);
+    assert!(commands.iter().any(|c| c.command == "pnpm dev"));
+    assert!(commands.iter().any(|c| c.command == "pnpm install"));
+}
+
+#[test]
+fn manager_detection_handles_each_unambiguous_lockfile_family() {
+    for (marker, manager) in [
+        ("pnpm-lock.yaml", "pnpm"),
+        ("yarn.lock", "yarn"),
+        ("package-lock.json", "npm"),
+        ("Cargo.toml", "cargo"),
+        ("go.mod", "go"),
+        ("pubspec.yaml", "pub"),
+        ("Pipfile", "pipenv"),
+        ("requirements.txt", "pip"),
+        ("Gemfile", "bundler"),
+        ("pom.xml", "maven"),
+        ("build.gradle.kts", "gradle"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), marker, "");
+        assert_eq!(
+            crate::detect::detect_manager(dir.path()).as_deref(),
+            Some(manager),
+            "{marker}"
+        );
+    }
+}
+
+#[test]
+fn malformed_and_wrong_shaped_package_scripts_are_safe() {
+    let dir = tempfile::tempdir().unwrap();
+    for contents in [
+        "{",
+        "null",
+        "[]",
+        r#"{"scripts":null}"#,
+        r#"{"scripts":[]}"#,
+    ] {
+        write(dir.path(), "package.json", contents);
+        assert!(crate::detect::detect_scripts(dir.path()).is_empty());
+        assert!(crate::commands::detect_commands(dir.path(), &[]).is_empty());
+    }
+}
+
+#[test]
+fn scanner_applies_saved_metadata_and_deduplicates_identical_roots() {
+    let (_dir, mut app) = fixture();
+    let id = app
+        .projects
+        .iter()
+        .find(|p| p.name == "beta")
+        .unwrap()
+        .id
+        .clone();
+    app.config.roots.push(app.config.roots[0].clone());
+    config::set_note(&mut app.config, &id, "saved 🦀".into());
+    config::set_project_status(&mut app.config, &id, ProjectStatus::Archived);
+    let result = scanner::scan_roots(&app.config).unwrap();
+    assert_eq!(result.projects_found, 3);
+    assert_eq!(result.projects.len(), 3);
+    let beta = result.projects.iter().find(|p| p.id == id).unwrap();
+    assert_eq!(beta.note.as_deref(), Some("saved 🦀"));
+    assert_eq!(beta.status, ProjectStatus::Archived);
+    assert_eq!(beta.warnings, beta.health.warnings);
+}
+
+#[test]
+fn scanner_ignores_build_and_vendor_trees_and_unmarked_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in [
+        "node_modules",
+        "target",
+        "vendor",
+        "dist",
+        "build",
+        ".hidden",
+    ] {
+        write(dir.path(), &format!("{name}/nested/package.json"), "{}");
+    }
+    write(dir.path(), "plain/README.md", "not a project");
+    write(dir.path(), "actual/package.json", "{}");
+    let result = scanner::scan_roots(&Config {
+        roots: vec![dir.path().to_string_lossy().into_owned()],
+        ..Config::default()
+    })
+    .unwrap();
+    assert_eq!(result.projects.len(), 1);
+    assert_eq!(result.projects[0].name, "actual");
+}
+
+#[test]
+fn scanner_handles_missing_root_and_zero_roots_without_panicking() {
+    let dir = tempfile::tempdir().unwrap();
+    for config in [
+        Config::default(),
+        Config {
+            roots: vec![dir.path().join("missing").to_string_lossy().into_owned()],
+            ..Config::default()
+        },
+    ] {
+        let result = scanner::scan_roots(&config).unwrap();
+        assert!(result.projects.is_empty());
+        assert_eq!(result.projects_found, 0);
+    }
+}
+
+#[test]
+fn project_model_json_round_trip_keeps_public_fields_and_unicode() {
+    let (_dir, mut app) = fixture();
+    let project = &mut app.projects[0];
+    project.note = Some("Nota 🦀 日本".into());
+    project.ports = vec![3000, 8080];
+    let json = serde_json::to_value(&*project).unwrap();
+    assert!(json.get("warnings").is_some());
+    assert!(json["health"].get("warnings").is_some());
+    let decoded: Project = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded.id, project.id);
+    assert_eq!(decoded.note, project.note);
+    assert_eq!(decoded.path, project.path);
+    assert_eq!(decoded.ports, project.ports);
+}
+
+#[test]
+fn legacy_project_json_without_ports_still_loads() {
+    let (_dir, app) = fixture();
+    let mut json = serde_json::to_value(&app.projects[0]).unwrap();
+    json.as_object_mut().unwrap().remove("ports");
+    let project: Project = serde_json::from_value(json).unwrap();
+    assert!(project.ports.is_empty());
+}
+
+#[test]
+fn artifact_detection_reports_existing_node_outputs_and_absent_outputs() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir(dir.path().join("dist")).unwrap();
+    let artifacts = crate::artifacts::detect_artifacts(dir.path(), &["Node".into()]);
+    let dist = artifacts
+        .iter()
+        .find(|a| a.path == dir.path().join("dist"))
+        .unwrap();
+    assert!(dist.exists);
+    assert_eq!(dist.kind, ArtifactKind::Folder);
+    assert!(
+        !artifacts
+            .iter()
+            .find(|a| a.path == dir.path().join("build"))
+            .unwrap()
+            .exists
+    );
+}
+
+#[test]
+fn flutter_artifacts_prefer_release_apk_and_find_windows_executable() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "build/app/outputs/flutter-apk/app-debug.apk",
+        "",
+    );
+    write(
+        dir.path(),
+        "build/app/outputs/flutter-apk/app-release.apk",
+        "",
+    );
+    write(dir.path(), "build/windows/x64/runner/Release/demo.exe", "");
+    let artifacts = crate::artifacts::detect_artifacts(dir.path(), &["Flutter/Dart".into()]);
+    assert!(artifacts
+        .iter()
+        .any(|a| a.kind == ArtifactKind::Executable && a.exists));
+    let apks: Vec<_> = artifacts
+        .iter()
+        .filter(|a| a.kind == ArtifactKind::Apk)
+        .collect();
+    assert_eq!(apks.len(), 1);
+    assert!(apks[0].path.ends_with("app-release.apk"));
+}
+
+#[test]
+fn unknown_stack_produces_no_guessed_artifacts() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(crate::artifacts::detect_artifacts(dir.path(), &[]).is_empty());
+}
+
+#[test]
+fn navigation_clamps_at_both_ends_and_empty_lists() {
+    let (_dir, mut app) = fixture();
+    app.move_up();
+    assert_eq!(app.selected, 0);
+    app.move_end();
+    assert_eq!(app.selected, 2);
+    app.move_down();
+    assert_eq!(app.selected, 2);
+    app.move_page_up();
+    assert_eq!(app.selected, 0);
+    app.move_page_down();
+    assert_eq!(app.selected, 2);
+    app.move_home();
+    assert_eq!(app.selected, 0);
+    app.projects.clear();
+    app.apply_filter_and_sort();
+    app.move_down();
+    app.move_end();
+    app.move_page_down();
+    app.move_up();
+    assert_eq!(app.selected, 0);
+    assert!(app.selected_project().is_none());
+}
+
+#[test]
+fn filters_match_status_notes_and_stack_without_losing_selection_identity() {
+    let (_dir, mut app) = fixture();
+    app.projects[0].status = ProjectStatus::Paused;
+    app.projects[1].status = ProjectStatus::Active;
+    app.projects[1].note = Some("todo".into());
+    app.projects[2].status = ProjectStatus::Archived;
+    for (filter, expected) in [
+        (FilterField::Paused, vec!["alpha"]),
+        (FilterField::Active, vec!["beta"]),
+        (FilterField::Archived, vec!["gamma"]),
+        (FilterField::WithNotes, vec!["beta"]),
+        (FilterField::Node, vec![]),
+        (FilterField::Rust, vec!["alpha", "beta", "gamma"]),
+    ] {
+        app.filter = filter;
+        app.apply_filter_and_sort();
+        assert_eq!(names(&app), expected);
+        assert!(app.selected < app.filtered_count().max(1));
+    }
+}
+
+#[test]
+fn filter_and_sort_cycles_return_to_the_original_value() {
+    let (_dir, mut app) = fixture();
+    let filter = app.filter;
+    let sort = app.sort;
+    for _ in FilterField::all() {
+        app.next_filter();
+    }
+    for _ in SortField::all() {
+        app.next_sort();
+    }
+    assert_eq!(app.filter, filter);
+    assert_eq!(app.sort, sort);
+}
+
+#[test]
+fn score_sort_uses_usage_and_keeps_selected_project() {
+    let (_dir, mut app) = fixture();
+    let selected = app.selected_project().unwrap().id.clone();
+    let beta = app
+        .projects
+        .iter()
+        .find(|p| p.name == "beta")
+        .unwrap()
+        .id
+        .clone();
+    app.config.scores.insert(
+        beta,
+        scoring::ScoreEntry {
+            visits: 100,
+            opens: 100,
+            last_used: None,
+        },
+    );
+    app.sort = SortField::Score;
+    app.apply_filter_and_sort();
+    assert_eq!(names(&app)[0], "beta");
+    assert_eq!(app.selected_project().unwrap().id, selected);
+}
+
+#[test]
+fn search_can_match_notes_and_cancel_restores_list() {
+    let (_dir, mut app) = fixture();
+    app.projects[1].note = Some("pendiente 日本".into());
+    key(&mut app, KeyCode::Char('/'));
+    for ch in "日本".chars() {
+        key(&mut app, KeyCode::Char(ch));
+    }
+    assert_eq!(names(&app), vec!["beta"]);
+    key(&mut app, KeyCode::Backspace);
+    assert_eq!(app.search_query, "日");
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!(app.filtered_count(), 3);
+    assert!(app.search_query.is_empty());
+}
+
+#[test]
+fn cancelled_note_does_not_write_and_successful_note_survives_rescan() {
+    let (dir, mut app) = fixture();
+    key(&mut app, KeyCode::Char('n'));
+    for ch in "discard 🦀".chars() {
+        key(&mut app, KeyCode::Char(ch));
+    }
+    key(&mut app, KeyCode::Esc);
+    assert!(!dir.path().join("saved.toml").exists());
+    assert!(app.selected_project().unwrap().note.is_none());
+    key(&mut app, KeyCode::Char('n'));
+    for ch in "persist 日本".chars() {
+        key(&mut app, KeyCode::Char(ch));
+    }
+    key(&mut app, KeyCode::Enter);
+    let config: Config =
+        toml::from_str(&fs::read_to_string(dir.path().join("saved.toml")).unwrap()).unwrap();
+    let result = scanner::scan_roots(&config).unwrap();
+    assert_eq!(
+        result
+            .projects
+            .iter()
+            .find(|p| p.name == "alpha")
+            .unwrap()
+            .note
+            .as_deref(),
+        Some("persist 日本")
+    );
+}
+
+#[test]
+fn status_save_failure_keeps_edit_target_and_original_status() {
+    let (dir, mut app) = fixture();
+    let original = app.selected_project().unwrap().status.clone();
+    key(&mut app, KeyCode::Char('m'));
+    let target = app.editing_project_id.clone();
+    app.status_selected = 3;
+    app.config_save_path = Some(dir.path().to_path_buf());
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.mode, Mode::ChangingStatus);
+    assert_eq!(app.editing_project_id, target);
+    assert_eq!(app.selected_project().unwrap().status, original);
+    assert!(app.config.project_status.is_empty());
+    assert!(app.status_message.as_deref().unwrap().contains("save"));
+}
+
+#[test]
+fn enter_records_one_visit_and_failed_save_records_none() {
+    let (dir, mut app) = fixture();
+    let id = app.selected_project().unwrap().id.clone();
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.config.scores[&id].visits, 1);
+    app.config_save_path = Some(dir.path().to_path_buf());
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.config.scores[&id].visits, 1);
+}
+
+#[test]
+fn open_menu_captures_selected_project_and_cancel_launches_nothing() {
+    let (_dir, mut app) = fixture();
+    key(&mut app, KeyCode::Char('o'));
+    key(&mut app, KeyCode::Esc);
+    assert!(app.pending_action.is_none());
+    let selected = app.selected_project().unwrap().path.clone();
+    key(&mut app, KeyCode::Char('o'));
+    key(&mut app, KeyCode::Char('V'));
+    let pending = app.pending_action.as_ref().unwrap();
+    assert_eq!(pending.project_path, selected);
+    assert_eq!(pending.action.command.as_deref(), Some("code"));
+    app.move_down();
+    assert_eq!(app.pending_action.as_ref().unwrap().project_path, selected);
+}
+
+#[test]
+fn empty_list_edit_and_open_actions_never_write_or_panic() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut app = App::new(Config::default());
+    app.config_save_path = Some(dir.path().join("must-not-exist.toml"));
+    for code in [
+        KeyCode::Char('n'),
+        KeyCode::Char('m'),
+        KeyCode::Enter,
+        KeyCode::Char('o'),
+        KeyCode::Char('v'),
+    ] {
+        key(&mut app, code);
+    }
+    assert!(!dir.path().join("must-not-exist.toml").exists());
+    assert!(app.pending_action.is_none());
+    assert_eq!(app.mode, Mode::Normal);
+}
+
+#[test]
+fn rendering_handles_empty_and_populated_lists_at_small_and_large_sizes() {
+    let (_dir, mut app) = fixture();
+    for populated in [true, false] {
+        if !populated {
+            app.projects.clear();
+            app.apply_filter_and_sort();
+        }
+        for mode in [
+            Mode::Normal,
+            Mode::Search,
+            Mode::EditingNote,
+            Mode::ChangingStatus,
+            Mode::Help,
+            Mode::OpenMenu,
+            Mode::ConfigMenu,
+        ] {
+            app.mode = mode;
+            app.note_input = "長いメモ 🦀".repeat(80);
+            app.search_query = "🦀".into();
+            for view in [ViewMode::Compact, ViewMode::Detailed] {
+                app.view_mode = view;
+                for (width, height) in [(1, 1), (10, 3), (40, 10), (80, 24), (160, 45)] {
+                    let _ = render(&app, width, height);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn rendering_displays_saved_note_and_selected_project() {
+    let (_dir, mut app) = fixture();
+    app.projects[0].note = Some("unique-saved-note".into());
+    app.apply_filter_and_sort();
+    let screen = render(&app, 160, 45);
+    assert!(screen.contains("alpha"));
+    assert!(screen.contains("unique-saved-note"));
+    assert!(screen.contains("quit"));
+}
+
+#[test]
+fn tokenization_and_matching_cover_unicode_camel_case_and_negative_cases() {
+    assert_eq!(
+        scoring::tokenize("myHTTPClient-demo_v2"),
+        vec!["my", "httpclient", "demo", "v2"]
+    );
+    for (name, query) in [
+        ("my-app", "myapp"),
+        ("devScope", "ds"),
+        ("Proyecto-Ágil", "ágil"),
+        ("日本-project", "日本"),
+        ("myHTTPClient", "http"),
+    ] {
+        assert!(scoring::matches_name(name, query), "{name} / {query}");
+    }
+    assert!(!scoring::matches_name("alpha", "beta"));
+    assert!(!scoring::matches_name("ab", "ba"));
+}
+
+#[test]
+fn exact_name_ranks_above_prefix_and_subsequence_at_equal_usage() {
+    let entry = scoring::ScoreEntry::default();
+    let exact = scoring::compute_score("project", "project", &entry);
+    let prefix = scoring::compute_score("project-tool", "project", &entry);
+    let subsequence = scoring::compute_score("p-r-o-j-e-c-t", "project", &entry);
+    assert!(exact > prefix);
+    assert!(prefix > subsequence);
+}
+
+#[test]
+fn cli_parser_accepts_commands_and_rejects_missing_or_unknown_arguments() {
+    for args in [
+        vec!["ds", "scan"],
+        vec!["ds", "list", "--json"],
+        vec!["ds", "note", "project", "text"],
+        vec!["ds", "status", "project", "paused"],
+        vec!["ds", "add-root", "with spaces"],
+        vec!["ds", "remove-root", "path"],
+        vec!["ds", "roots"],
+        vec!["ds", "config", "--edit"],
+        vec!["ds", "open", "project"],
+        vec!["ds", "discover", "--apply"],
+    ] {
+        assert!(crate::cli::Cli::try_parse_from(args).is_ok());
+    }
+    for args in [
+        vec!["ds", "note", "project"],
+        vec!["ds", "status"],
+        vec!["ds", "list", "--unknown"],
+        vec!["ds", "add-root"],
+        vec!["ds", "unknown-command"],
+    ] {
+        assert!(crate::cli::Cli::try_parse_from(args).is_err());
+    }
+}
+
+#[test]
+fn cli_project_resolution_handles_exact_partial_missing_and_ambiguous_names() {
+    let (_dir, app) = fixture();
+    assert!(crate::find_project_path(&app.config, "ALPHA")
+        .unwrap()
+        .ends_with("alpha"));
+    assert!(crate::find_project_path(&app.config, "bet")
+        .unwrap()
+        .ends_with("beta"));
+    assert!(crate::find_project_path(&app.config, "not-found").is_err());
+    assert!(crate::find_project_path(&app.config, "a").is_err());
+}
+
+#[test]
+fn session_root_validation_rejects_missing_paths_and_files() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "file", "");
+    assert!(crate::build_temporary_root_config(
+        Config::default(),
+        dir.path().join("missing").to_str().unwrap()
+    )
+    .is_err());
+    assert!(crate::build_temporary_root_config(
+        Config::default(),
+        dir.path().join("file").to_str().unwrap()
+    )
+    .is_err());
+}
+
+#[test]
+fn relative_times_reject_out_of_range_dates_and_missing_dates() {
+    let mut activity = crate::project::ActivityInfo {
+        timestamp: None,
+        last_modified_ts: None,
+        last_git_activity_ts: None,
+    };
+    assert_eq!(activity.relative_time(), "unknown");
+    activity.timestamp = Some(i64::MAX);
+    assert_eq!(activity.relative_time(), "unknown");
+    activity.last_git_activity_ts = Some(i64::MIN);
+    assert_eq!(activity.last_git_activity_display(), Some(String::new()));
+}
+
+#[test]
+fn git_status_distinguishes_clean_untracked_staged_and_deleted_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    write(dir.path(), "tracked", "first");
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new("tracked")).unwrap();
+    index.write().unwrap();
+    let tree_id = index.write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let signature = git2::Signature::now("test", "test@example.invalid").unwrap();
+    repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+        .unwrap();
+    assert_eq!(
+        crate::git::get_git_status(dir.path()).unwrap(),
+        (DirtyStatus::Clean, Some(0), Some(0))
+    );
+    write(dir.path(), "new", "untracked");
+    assert_eq!(
+        crate::git::get_git_status(dir.path()).unwrap(),
+        (DirtyStatus::Dirty, Some(0), Some(1))
+    );
+    index.add_path(Path::new("new")).unwrap();
+    index.write().unwrap();
+    fs::remove_file(dir.path().join("tracked")).unwrap();
+    assert_eq!(
+        crate::git::get_git_status(dir.path()).unwrap(),
+        (DirtyStatus::Dirty, Some(2), Some(0))
+    );
+}
+
+#[test]
+fn git_info_supports_unborn_committed_and_detached_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    let empty = crate::git::get_git_info_fast(dir.path()).unwrap();
+    assert_eq!(empty.last_commit_hash, "none");
+    assert!(empty.last_commit_timestamp.is_none());
+    let tree_id = repo.index().unwrap().write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let signature = git2::Signature::now("test", "test@example.invalid").unwrap();
+    let oid = repo
+        .commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            "first line\nsecond line",
+            &tree,
+            &[],
+        )
+        .unwrap();
+    let info = crate::git::get_git_info_fast(dir.path()).unwrap();
+    assert_eq!(info.last_commit_hash, &oid.to_string()[..7]);
+    assert_eq!(info.last_commit_message, "first line");
+    assert!(info.last_commit_timestamp.is_some());
+    repo.set_head_detached(oid).unwrap();
+    let detached = crate::git::get_git_info_fast(dir.path()).unwrap();
+    assert_eq!(detached.last_commit_hash, info.last_commit_hash);
+    assert!(detached.upstream.is_none());
+}
+
+#[test]
+fn cli_mutations_scan_and_list_use_only_the_injected_config() {
+    let (dir, app) = fixture();
+    let path = dir.path().join("cli/config.toml");
+    config::with_test_config_path(path.clone(), || {
+        config::save_config(&app.config).unwrap();
+        crate::cmd_roots().unwrap();
+        crate::cmd_scan().unwrap();
+        crate::cmd_list(true).unwrap();
+        crate::cmd_list(false).unwrap();
+        crate::cmd_config(false).unwrap();
+        crate::cmd_config(true).unwrap();
+        crate::cmd_note("alpha".into(), "persisted through CLI 🦀".into()).unwrap();
+        crate::cmd_status("alpha".into(), "paused".into()).unwrap();
+        crate::cmd_open("alpha".into()).unwrap();
+        let saved = config::load_config().unwrap();
+        let alpha = app.projects.iter().find(|p| p.name == "alpha").unwrap();
+        assert_eq!(saved.notes[&alpha.id], "persisted through CLI 🦀");
+        assert_eq!(
+            config::get_project_status(&saved, &alpha.id),
+            Some(ProjectStatus::Paused)
+        );
+        assert_eq!(saved.scores[&alpha.id].opens, 3);
+        assert_eq!(saved.scores[&alpha.id].visits, 0);
+        let before = fs::read(&path).unwrap();
+        assert!(crate::cmd_status("alpha".into(), "invalid".into()).is_err());
+        assert!(crate::cmd_note("missing".into(), "must not save".into()).is_err());
+        assert_eq!(fs::read(&path).unwrap(), before);
+    });
+}
+
+#[test]
+fn cli_add_and_remove_roots_are_idempotent_and_preserve_notes() {
+    let (dir, app) = fixture();
+    config::with_test_config_path(dir.path().join("config.toml"), || {
+        let mut initial = app.config;
+        initial.notes.insert("keep".into(), "unchanged".into());
+        config::save_config(&initial).unwrap();
+        let extra = dir.path().join("extra").to_string_lossy().into_owned();
+        crate::cmd_add_root(extra.clone()).unwrap();
+        crate::cmd_add_root(extra.clone()).unwrap();
+        assert_eq!(config::load_config().unwrap().roots.len(), 2);
+        crate::cmd_remove_root(extra.clone()).unwrap();
+        crate::cmd_remove_root(extra).unwrap();
+        let saved = config::load_config().unwrap();
+        assert_eq!(saved.roots, initial.roots);
+        assert_eq!(saved.notes, initial.notes);
+    });
+}
+
+#[test]
+fn config_loading_handles_first_run_and_reports_malformed_or_unreadable_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("new/config.toml");
+    config::with_test_config_path(path.clone(), || {
+        assert!(config::load_config().unwrap().roots.is_empty());
+        assert!(path.is_file());
+        assert!(crate::cmd_roots().is_ok());
+        fs::write(&path, "roots = [").unwrap();
+        assert!(config::load_config()
+            .unwrap_err()
+            .to_string()
+            .contains("parse"));
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(config::load_config()
+            .unwrap_err()
+            .to_string()
+            .contains("read"));
+    });
+}
+
+#[test]
+fn config_test_scopes_restore_on_panic_and_are_isolated_between_threads() {
+    let dir = tempfile::tempdir().unwrap();
+    let outer = dir.path().join("outer.toml");
+    config::with_test_config_path(outer.clone(), || {
+        let result = std::panic::catch_unwind(|| {
+            config::with_test_config_path(dir.path().join("inner.toml"), || panic!("test unwind"));
+        });
+        assert!(result.is_err());
+        assert_eq!(config::config_path().unwrap(), outer);
+        let other = dir.path().join("other.toml");
+        std::thread::spawn(move || {
+            config::with_test_config_path(other.clone(), || {
+                assert_eq!(config::config_path().unwrap(), other)
+            });
+        })
+        .join()
+        .unwrap();
+        assert_eq!(config::config_path().unwrap(), outer);
+    });
+}
+
+#[test]
+fn render_git_states_and_rich_project_details_without_panics_or_missing_data() {
+    let (dir, mut app) = fixture();
+    let path = dir.path().join("alpha");
+    git2::Repository::init(&path).unwrap();
+    let mut info = crate::git::get_git_info_fast(&path).unwrap();
+    info.branch = "feature/testing".into();
+    info.remote_url = Some("https://github.com/team/project.git".into());
+    info.has_remote = true;
+    info.upstream = Some("origin/main".into());
+    info.ahead = Some(3);
+    info.behind = Some(2);
+    info.modified_count = Some(5);
+    info.untracked_count = Some(1);
+    app.projects[0].ports = vec![3000, 8080];
+    app.projects[0].note = Some("rich-note".into());
+    for status in [
+        DirtyStatus::Unknown,
+        DirtyStatus::Queued,
+        DirtyStatus::Checking,
+        DirtyStatus::Clean,
+        DirtyStatus::Dirty,
+        DirtyStatus::Error,
+    ] {
+        info.dirty_status = status;
+        app.projects[0].git = Some(info.clone());
+        scanner::recompute_project_health(&mut app.projects[0]);
+        for view in [ViewMode::Compact, ViewMode::Detailed] {
+            app.view_mode = view;
+            let screen = render(&app, 180, 80);
+            assert!(screen.contains("alpha"));
+            if view == ViewMode::Detailed {
+                assert!(screen.contains("rich-note"));
+                assert!(screen.contains("feature/testing"));
+                assert!(screen.contains("8080"));
+            }
+        }
+    }
+}
+
+#[test]
+fn activity_and_status_sorts_have_the_expected_order() {
+    let (_dir, mut app) = fixture();
+    let alpha = app.projects.iter_mut().find(|p| p.name == "alpha").unwrap();
+    alpha.activity.timestamp = Some(100);
+    alpha.status = ProjectStatus::Paused;
+    let beta = app.projects.iter_mut().find(|p| p.name == "beta").unwrap();
+    beta.activity.timestamp = Some(300);
+    beta.status = ProjectStatus::Active;
+    let gamma = app.projects.iter_mut().find(|p| p.name == "gamma").unwrap();
+    gamma.activity.timestamp = Some(200);
+    gamma.status = ProjectStatus::Archived;
+    app.sort = SortField::Activity;
+    app.apply_filter_and_sort();
+    assert_eq!(names(&app), vec!["beta", "gamma", "alpha"]);
+    app.sort = SortField::Status;
+    app.apply_filter_and_sort();
+    assert_eq!(names(&app), vec!["beta", "gamma", "alpha"]);
+    app.sort = SortField::Path;
+    app.apply_filter_and_sort();
+    assert_eq!(names(&app), vec!["alpha", "beta", "gamma"]);
+}
+
+#[test]
+fn status_navigation_clamps_and_escape_cancels_without_saving() {
+    let (dir, mut app) = fixture();
+    key(&mut app, KeyCode::Char('m'));
+    for _ in 0..20 {
+        key(&mut app, KeyCode::Down);
+    }
+    assert_eq!(app.status_selected, app.status_options.len() - 1);
+    for _ in 0..20 {
+        key(&mut app, KeyCode::Up);
+    }
+    assert_eq!(app.status_selected, 0);
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(app.editing_project_id.is_none());
+    assert!(!dir.path().join("saved.toml").exists());
+}
+
+#[test]
+fn unknown_open_action_and_empty_action_list_report_errors_without_launching() {
+    let (_dir, mut app) = fixture();
+    key(&mut app, KeyCode::Char('o'));
+    key(&mut app, KeyCode::Char('!'));
+    assert!(app.pending_action.is_none());
+    assert!(app
+        .status_message
+        .as_deref()
+        .unwrap()
+        .contains("No open action"));
+    app.config.open.actions.clear();
+    key(&mut app, KeyCode::Char('o'));
+    assert_eq!(app.mode, Mode::Normal);
+    assert!(app
+        .status_message
+        .as_deref()
+        .unwrap()
+        .contains("No open actions"));
+}
+
+#[test]
+#[cfg(unix)]
+fn saved_config_starts_private_and_preserves_existing_unix_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    config::save_config_at(&Config::default(), &path).unwrap();
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+    config::save_config_at(&Config::default(), &path).unwrap();
+    assert_eq!(
+        fs::metadata(path).unwrap().permissions().mode() & 0o777,
+        0o640
+    );
+}

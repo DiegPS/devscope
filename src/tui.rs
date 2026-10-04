@@ -344,6 +344,20 @@ fn record_open(app: &mut App, path: &std::path::Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires a real PTY; run python scripts/test_tui.py"]
+    fn real_terminal_child() {
+        let root = std::env::var("DS_TEST_TUI_ROOT").expect("PTY fixture root required");
+        let path = std::path::PathBuf::from(&root).join("test-config.toml");
+        crate::config::with_test_config_path(path, || {
+            run_tui(Config {
+                roots: vec![root],
+                ..Config::default()
+            })
+            .unwrap();
+        });
+    }
     #[cfg(target_os = "windows")]
     use std::fs;
     #[cfg(target_os = "windows")]

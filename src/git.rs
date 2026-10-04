@@ -256,6 +256,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn remote_credentials_are_redacted_before_entering_the_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        repo.remote(
+            "origin",
+            "https://user:private-token@github.com/team/project.git",
+        )
+        .unwrap();
+        let info = get_git_info_fast(dir.path()).unwrap();
+        assert_eq!(
+            info.remote_url.as_deref(),
+            Some("https://***@github.com/team/project.git")
+        );
+        assert_eq!(info.remote_host.as_deref(), Some("github.com"));
+        assert_eq!(info.remote_repo.as_deref(), Some("team/project"));
+        assert!(!serde_json::to_string(&info)
+            .unwrap()
+            .contains("private-token"));
+    }
+
+    #[test]
+    fn remote_parsing_handles_ssh_https_and_missing_urls() {
+        for url in [
+            "git@github.com:team/project.git",
+            "https://github.com/team/project.git",
+            "http://user@github.com/team/project.git",
+        ] {
+            assert_eq!(
+                parse_remote_info(Some(url)),
+                (Some("github.com".into()), Some("team/project".into()))
+            );
+        }
+        for url in [None, Some("local/path"), Some("https://host-only")] {
+            assert_eq!(parse_remote_info(url), (None, None));
+        }
+        assert_eq!(
+            sanitize_remote_url("git@github.com:team/project.git"),
+            "git@github.com:team/project.git"
+        );
+    }
+
+    #[test]
     fn staged_additions_are_dirty_and_counted_once() {
         let dir = tempfile::tempdir().unwrap();
         let repo = Repository::init(dir.path()).unwrap();

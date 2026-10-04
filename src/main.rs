@@ -16,6 +16,9 @@ mod snapshot;
 mod tui;
 mod ui;
 
+#[cfg(test)]
+mod regression_tests;
+
 use std::path::Path;
 use std::time::Instant;
 
