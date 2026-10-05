@@ -413,9 +413,6 @@ fn find_last_modified(snapshot: &DirSnapshot) -> Option<i64> {
         "Dockerfile",
         "docker-compose.yml",
         "README.md",
-        "src",
-        "lib",
-        "app",
     ];
 
     for file in &relevant_files {
@@ -447,6 +444,25 @@ fn find_last_modified(snapshot: &DirSnapshot) -> Option<i64> {
         }
     }
 
+    // Directory mtime does not change when an existing file is edited.
+    // Inspect source trees without following links or entering build caches.
+    for dir in ["src", "lib", "app", "tests", "scripts"] {
+        if !snapshot.has(dir) {
+            continue;
+        }
+        for entry in walkdir::WalkDir::new(snapshot.root().join(dir))
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| !SKIP_DIRS.contains(&e.file_name().to_string_lossy().as_ref()))
+            .filter_map(Result::ok)
+        {
+            if entry.file_type().is_file() {
+                if let Some(modified) = entry.metadata().ok().and_then(|m| m.modified().ok()) {
+                    latest = Some(latest.map_or(modified, |old| old.max(modified)));
+                }
+            }
+        }
+    }
     latest.and_then(system_time_to_timestamp)
 }
 

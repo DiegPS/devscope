@@ -1405,3 +1405,58 @@ fn scanner_obeys_options_exact_depth_and_nested_workspace_members() {
     write(dir.path(), "Cargo.toml", "[workspace]");
     assert_eq!(scanner::scan_roots(&config).unwrap().projects_found, 1);
 }
+
+#[test]
+fn activity_uses_existing_source_file_edits_not_directory_mtime() {
+    use std::time::{Duration, SystemTime};
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "Cargo.toml", "[package]\nname='test'");
+    write(dir.path(), "src/nested/existing.rs", "fn main() {}");
+    let future = SystemTime::now() + Duration::from_secs(60);
+    fs::File::options()
+        .write(true)
+        .open(dir.path().join("src/nested/existing.rs"))
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(future))
+        .unwrap();
+    let result = scanner::scan_roots(&Config {
+        roots: vec![dir.path().to_string_lossy().into_owned()],
+        ..Config::default()
+    })
+    .unwrap();
+    assert_eq!(
+        result.projects[0].activity.last_modified_ts,
+        Some(
+            future
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64
+        )
+    );
+}
+
+#[test]
+fn cargo_artifacts_use_bin_names_workspace_target_and_library_has_no_guessed_executable() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "Cargo.toml", "[workspace]\nmembers=['member']");
+    write(
+        dir.path(),
+        ".cargo/config.toml",
+        "[build]\ntarget-dir='output'",
+    );
+    write(
+        dir.path(),
+        "member/Cargo.toml",
+        "[package]\nname='different-package'\nautobins=false\n[[bin]]\nname='ds'",
+    );
+    let artifacts =
+        crate::artifacts::detect_artifacts(&dir.path().join("member"), &["Rust".into()]);
+    let filename = if cfg!(windows) { "ds.exe" } else { "ds" };
+    assert!(artifacts
+        .iter()
+        .any(|a| a.path == dir.path().join("output/release").join(filename)));
+    write(dir.path(), "member/Cargo.toml", "[package]\nname='library'");
+    let artifacts =
+        crate::artifacts::detect_artifacts(&dir.path().join("member"), &["Rust".into()]);
+    assert!(artifacts.iter().all(|a| a.kind != ArtifactKind::Executable));
+}

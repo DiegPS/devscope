@@ -24,7 +24,7 @@ pub(crate) fn detect_artifacts_with_snapshot(
         detect_flutter_artifacts(project_path, &mut artifacts);
     }
     if is_rust {
-        detect_rust_artifacts(project_path, &mut artifacts);
+        detect_rust_artifacts(snapshot, &mut artifacts);
     }
     if is_tauri {
         detect_tauri_artifacts(project_path, &mut artifacts);
@@ -130,45 +130,108 @@ fn detect_flutter_artifacts(project_path: &Path, artifacts: &mut Vec<ProjectArti
     }
 }
 
-fn detect_rust_artifacts(project_path: &Path, artifacts: &mut Vec<ProjectArtifact>) {
-    let project_name = project_path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-
-    #[cfg(target_os = "windows")]
+fn detect_rust_artifacts(snapshot: &DirSnapshot, artifacts: &mut Vec<ProjectArtifact>) {
+    let Some(manifest) = snapshot
+        .read_to_string("Cargo.toml")
+        .and_then(|s| s.parse::<toml::Value>().ok())
+    else {
+        return;
+    };
+    let path = snapshot.root();
+    let mut workspace = path.to_path_buf();
+    if let Some(explicit) = manifest
+        .get("package")
+        .and_then(|p| p.get("workspace"))
+        .and_then(toml::Value::as_str)
     {
-        let debug_exe = project_path.join(format!("target/debug/{}.exe", project_name));
-        artifacts.push(ProjectArtifact::new(
-            "Debug exe",
-            debug_exe,
-            ArtifactKind::Executable,
-        ));
-
-        let release_exe = project_path.join(format!("target/release/{}.exe", project_name));
-        artifacts.push(ProjectArtifact::new(
-            "Release exe",
-            release_exe,
-            ArtifactKind::Executable,
-        ));
+        workspace = path.join(explicit);
+    } else if !manifest.get("workspace").is_some_and(toml::Value::is_table) {
+        for ancestor in path.ancestors().skip(1) {
+            if std::fs::read_to_string(ancestor.join("Cargo.toml"))
+                .ok()
+                .and_then(|s| s.parse::<toml::Value>().ok())
+                .is_some_and(|m| m.get("workspace").is_some_and(toml::Value::is_table))
+            {
+                workspace = ancestor.to_path_buf();
+                break;
+            }
+        }
     }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let debug_bin = project_path.join(format!("target/debug/{}", project_name));
-        artifacts.push(ProjectArtifact::new(
-            "Debug binary",
-            debug_bin,
-            ArtifactKind::Executable,
-        ));
-
-        let release_bin = project_path.join(format!("target/release/{}", project_name));
-        artifacts.push(ProjectArtifact::new(
-            "Release binary",
-            release_bin,
-            ArtifactKind::Executable,
-        ));
+    let configured_target = path.ancestors().find_map(|root| {
+        [".cargo/config.toml", ".cargo/config"]
+            .iter()
+            .find_map(|name| {
+                let config = std::fs::read_to_string(root.join(name))
+                    .ok()?
+                    .parse::<toml::Value>()
+                    .ok()?;
+                let target = config.get("build")?.get("target-dir")?.as_str()?;
+                Some(root.join(target))
+            })
+    });
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(std::path::PathBuf::from)
+        .map(|target| {
+            if target.is_absolute() {
+                target
+            } else {
+                path.join(target)
+            }
+        })
+        .or(configured_target)
+        .unwrap_or_else(|| workspace.join("target"));
+    let mut names = std::collections::BTreeSet::new();
+    if let Some(bins) = manifest.get("bin").and_then(toml::Value::as_array) {
+        for bin in bins {
+            if let Some(name) = bin.get("name").and_then(toml::Value::as_str) {
+                names.insert(name.to_owned());
+            }
+        }
     }
+    if let Some(package) = manifest.get("package") {
+        if package.get("autobins").and_then(toml::Value::as_bool) != Some(false) {
+            if path.join("src/main.rs").is_file() {
+                if let Some(name) = package.get("name").and_then(toml::Value::as_str) {
+                    names.insert(name.to_owned());
+                }
+            }
+            if let Ok(bins) = std::fs::read_dir(path.join("src/bin")) {
+                for bin in bins.flatten() {
+                    let path = bin.path();
+                    if path.extension().is_some_and(|ext| ext == "rs")
+                        || path.join("main.rs").is_file()
+                    {
+                        if let Some(name) = path.file_stem().and_then(|n| n.to_str()) {
+                            names.insert(name.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for name in names {
+        // A manifest is data, never permission to escape the target directory.
+        if name.contains(['/', '\\']) || name == "." || name == ".." {
+            continue;
+        }
+        for profile in ["debug", "release"] {
+            let filename = if cfg!(windows) {
+                format!("{name}.exe")
+            } else {
+                name.clone()
+            };
+            artifacts.push(ProjectArtifact::new(
+                &format!("{profile}: {name}"),
+                target.join(profile).join(filename),
+                ArtifactKind::Executable,
+            ));
+        }
+    }
+    artifacts.push(ProjectArtifact::new(
+        "Cargo target",
+        target,
+        ArtifactKind::Folder,
+    ));
 }
 
 fn detect_tauri_artifacts(project_path: &Path, artifacts: &mut Vec<ProjectArtifact>) {

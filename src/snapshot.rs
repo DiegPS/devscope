@@ -1,5 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 #[derive(Debug, Clone)]
@@ -14,6 +15,7 @@ pub(crate) struct DirSnapshot {
     root: PathBuf,
     names: HashSet<String>,
     entries: Vec<DirEntrySnapshot>,
+    contents: Arc<Mutex<HashMap<String, Option<String>>>>,
 }
 
 impl DirSnapshot {
@@ -41,6 +43,7 @@ impl DirSnapshot {
             root: path.to_path_buf(),
             names,
             entries,
+            contents: Arc::default(),
         }
     }
 
@@ -61,7 +64,12 @@ impl DirSnapshot {
             return None;
         }
 
-        std::fs::read_to_string(self.root.join(name)).ok()
+        self.contents
+            .lock()
+            .expect("snapshot contents lock")
+            .entry(name.to_owned())
+            .or_insert_with(|| std::fs::read_to_string(self.root.join(name)).ok())
+            .clone()
     }
 
     pub fn entries(&self) -> &[DirEntrySnapshot] {
