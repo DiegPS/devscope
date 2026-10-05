@@ -572,14 +572,16 @@ impl App {
     pub fn persist_config(&mut self, updated: Config) -> bool {
         #[cfg(test)]
         let result = match self.config_save_path.as_ref() {
-            Some(path) => crate::config::save_config_at(&updated, path),
-            None => crate::config::save_config(&updated),
+            Some(path) => crate::config::commit_config_at(&updated, path),
+            None => crate::config::config_path()
+                .and_then(|path| crate::config::commit_config_at(&updated, &path)),
         };
         #[cfg(not(test))]
-        let result = crate::config::save_config(&updated);
+        let result = crate::config::config_path()
+            .and_then(|path| crate::config::commit_config_at(&updated, &path));
         match result {
-            Ok(()) => {
-                self.config = updated;
+            Ok(saved) => {
+                self.config = saved;
                 true
             }
             Err(error) => {

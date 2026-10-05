@@ -9,6 +9,8 @@ use crate::scoring::ScoreMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    #[serde(skip)]
+    pub(crate) persisted: Option<toml::Value>,
     #[serde(default)]
     pub roots: Vec<String>,
 
@@ -141,6 +143,7 @@ fn default_theme() -> String {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            persisted: None,
             roots: Vec::new(),
             session_roots: None,
             max_depth: default_max_depth(),
@@ -255,17 +258,19 @@ pub fn normalize_path(path: &std::path::Path) -> PathBuf {
 pub fn load_config() -> Result<Config> {
     let path = config_path()?;
     if !path.exists() {
-        let config = Config::default();
+        let mut config = Config::default();
         save_config(&config)?;
+        config.persisted = Some(toml::Value::try_from(&config)?);
         return Ok(config);
     }
 
     let content = std::fs::read_to_string(&path)
         .with_context(|| format!("Failed to read config at {}", path.display()))?;
 
-    let config: Config = toml::from_str(&content)
+    let mut config: Config = toml::from_str(&content)
         .with_context(|| format!("Failed to parse config at {}", path.display()))?;
-
+    config.persisted = Some(toml::from_str(&content)?);
+    migrate_project_keys(&mut config)?;
     Ok(config)
 }
 
@@ -275,6 +280,150 @@ pub fn save_config(config: &Config) -> Result<()> {
 }
 
 pub(crate) fn save_config_at(config: &Config, path: &Path) -> Result<()> {
+    commit_config_at(config, path).map(|_| ())
+}
+
+pub(crate) fn commit_config_at(config: &Config, path: &Path) -> Result<Config> {
+    let resolved = if path.is_symlink() {
+        Some(std::fs::canonicalize(path)?)
+    } else {
+        None
+    };
+    let path = resolved.as_deref().unwrap_or(path);
+    let mut merged = toml::Value::try_from(config)?;
+    // Only read-modify-write operations need conflict protection. Explicit
+    // construction/replacement remains supported for initial configuration.
+    let _lock = if config.persisted.is_some() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let lock_path = path.with_extension("toml.lock");
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let lock = options.open(lock_path)?;
+        lock.lock()?;
+        let current: toml::Value = toml::from_str(
+            &std::fs::read_to_string(path).context("Config disappeared during editing")?,
+        )?;
+        merged = merge_value(config.persisted.as_ref(), Some(&merged), Some(&current), "")?
+            .context("Config cannot be deleted")?;
+        Some(lock)
+    } else {
+        None
+    };
+    let mut updated: Config = merged.clone().try_into()?;
+    updated.session_roots = config.session_roots.clone();
+    write_config_at(&updated, path)?;
+    updated.persisted = Some(merged);
+    Ok(updated)
+}
+
+fn merge_value(
+    base: Option<&toml::Value>,
+    ours: Option<&toml::Value>,
+    theirs: Option<&toml::Value>,
+    key: &str,
+) -> Result<Option<toml::Value>> {
+    if ours == base {
+        return Ok(theirs.cloned());
+    }
+    if theirs == base {
+        return Ok(ours.cloned());
+    }
+    if let (Some(toml::Value::Table(ours)), Some(toml::Value::Table(theirs))) = (ours, theirs) {
+        let base = base.and_then(toml::Value::as_table);
+        let keys: std::collections::BTreeSet<_> = ours
+            .keys()
+            .chain(theirs.keys())
+            .chain(base.into_iter().flat_map(|b| b.keys()))
+            .collect();
+        let mut merged = toml::map::Map::new();
+        for field in keys {
+            if let Some(value) = merge_value(
+                base.and_then(|b| b.get(field)),
+                ours.get(field),
+                theirs.get(field),
+                &format!("{key}/{field}"),
+            )? {
+                merged.insert(field.clone(), value);
+            }
+        }
+        return Ok(Some(toml::Value::Table(merged)));
+    }
+    if key.starts_with("/scores/") {
+        if let (Some(b), Some(o), Some(t)) = (
+            Some(base.and_then(toml::Value::as_integer).unwrap_or(0)),
+            ours.and_then(toml::Value::as_integer),
+            theirs.and_then(toml::Value::as_integer),
+        ) {
+            if key.ends_with("/visits") || key.ends_with("/opens") {
+                if o >= b && t >= b {
+                    return Ok(Some(toml::Value::Integer(
+                        t.saturating_add(o - b).min(u32::MAX as i64),
+                    )));
+                }
+            } else if key.ends_with("/last_used") {
+                return Ok(Some(toml::Value::Integer(o.max(t))));
+            }
+        }
+    }
+    if ours == theirs {
+        return Ok(ours.cloned());
+    }
+    anyhow::bail!("Concurrent config edit at {key}; reload before retrying (no data overwritten)")
+}
+
+pub(crate) fn project_key(path: &Path) -> String {
+    dunce::canonicalize(path)
+        .unwrap_or_else(|_| normalize_path(path))
+        .to_string_lossy()
+        .into_owned()
+}
+
+pub(crate) fn migrate_project_keys(config: &mut Config) -> Result<()> {
+    for map in [&mut config.notes, &mut config.project_status] {
+        let originals = map.clone();
+        let mut aliases: Vec<_> = originals.iter().collect();
+        aliases.sort_by_key(|(key, _)| *key);
+        for (old, value) in aliases {
+            if !Path::new(&old).exists() {
+                continue;
+            }
+            let key = project_key(Path::new(old));
+            if originals.contains_key(&key) {
+                continue;
+            }
+            if map.get(&key).is_some_and(|existing| existing != value) {
+                anyhow::bail!("Conflicting metadata aliases for {key}; original config preserved");
+            }
+            map.entry(key).or_insert(value.clone());
+        }
+    }
+    let originals = config.scores.clone();
+    for (old, value) in &originals {
+        if Path::new(&old).exists() {
+            let key = project_key(Path::new(old));
+            if originals.contains_key(&key) {
+                continue;
+            }
+            let entry = config.scores.entry(key).or_default();
+            // Aliases can be copies of the same history: adding them would
+            // inflate ranking on every load. Keep original entries and use
+            // deterministic maxima for the canonical identity.
+            entry.visits = entry.visits.max(value.visits);
+            entry.opens = entry.opens.max(value.opens);
+            entry.last_used = entry.last_used.max(value.last_used);
+        }
+    }
+    Ok(())
+}
+
+fn write_config_at(config: &Config, path: &Path) -> Result<()> {
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
 

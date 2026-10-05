@@ -94,12 +94,17 @@ pub struct ScanResult {
 /// Scan all configured roots and return detected projects.
 pub fn scan_roots(config: &Config) -> Result<ScanResult> {
     let start = Instant::now();
+    let mut normalized = config.clone();
+    crate::config::migrate_project_keys(&mut normalized)?;
+    let config = &normalized;
 
     let roots: Vec<PathBuf> = config
         .active_roots()
         .iter()
         .filter_map(|root_str| {
-            let root = normalize_path(&expand_tilde(root_str));
+            let root = PathBuf::from(crate::config::project_key(&normalize_path(&expand_tilde(
+                root_str,
+            ))));
             if !root.exists() {
                 eprintln!("Warning: root path does not exist: {}", root.display());
                 return None;

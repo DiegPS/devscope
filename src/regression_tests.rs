@@ -163,6 +163,46 @@ fn help_scroll_reaches_the_end_and_close_hint_stays_visible() {
 }
 
 #[test]
+fn concurrent_config_merges_independent_edits_and_adds_visits_without_lost_updates() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    config::save_config_at(&Config::default(), &path).unwrap();
+    config::with_test_config_path(path.clone(), || {
+        let mut a = config::load_config().unwrap();
+        let mut b = config::load_config().unwrap();
+        config::set_note(&mut a, "one", "first".into());
+        config::set_note(&mut b, "two", "second".into());
+        config::record_visit(&mut a, "project");
+        config::record_visit(&mut b, "project");
+        config::commit_config_at(&a, &path).unwrap();
+        config::commit_config_at(&b, &path).unwrap();
+        let saved = config::load_config().unwrap();
+        assert_eq!(saved.notes.len(), 2);
+        assert_eq!(saved.scores["project"].visits, 2);
+        let mut a = saved.clone();
+        let mut b = saved;
+        config::set_note(&mut a, "one", "changed-a".into());
+        config::set_note(&mut b, "one", "changed-b".into());
+        config::commit_config_at(&a, &path).unwrap();
+        assert!(config::commit_config_at(&b, &path).is_err());
+        assert_eq!(config::load_config().unwrap().notes["one"], "changed-a");
+    });
+}
+
+#[test]
+fn canonical_project_identity_deduplicates_alias_roots_and_keeps_old_metadata() {
+    let (dir, mut app) = fixture();
+    let root = dir.path().join("alpha");
+    let alias = root.join("..").join("alpha").to_string_lossy().into_owned();
+    app.config.roots = vec![root.to_string_lossy().into_owned(), alias.clone()];
+    app.config.notes.insert(alias, "legacy-note".into());
+    let scanned = scanner::scan_roots(&app.config).unwrap();
+    assert_eq!(scanned.projects.len(), 1);
+    assert_eq!(scanned.projects[0].id, config::project_key(&root));
+    assert_eq!(scanned.projects[0].note.as_deref(), Some("legacy-note"));
+}
+
+#[test]
 fn compact_header_and_border_context_preserve_nine_project_rows_at_80x24() {
     let (_dir, mut app) = fixture();
     let template = app.projects[0].clone();
