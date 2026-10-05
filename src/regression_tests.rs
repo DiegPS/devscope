@@ -1751,3 +1751,26 @@ fn git_snapshot_counts_remote_and_local_upstreams_from_the_same_head() {
     assert_eq!(info.upstream.as_deref(), Some("shared"));
     assert_eq!((info.ahead, info.behind), (Some(1), Some(0)));
 }
+
+#[test]
+#[cfg(unix)]
+fn tracked_env_warning_survives_a_symlink_to_the_worktree_directory() {
+    let repo_dir = tempfile::tempdir().unwrap();
+    let alias_dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(repo_dir.path()).unwrap();
+    write(
+        repo_dir.path(),
+        ".env.local",
+        "must never read these contents",
+    );
+    write(repo_dir.path(), ".gitignore", ".env*\n");
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new(".env.local")).unwrap();
+    index.write().unwrap();
+    let alias = alias_dir.path().join("repo-alias");
+    std::os::unix::fs::symlink(repo_dir.path(), &alias).unwrap();
+    let health = crate::health::compute_health(&alias, &None, None, true);
+    assert!(health
+        .warnings
+        .contains(&crate::project::ProjectWarning::EnvFileLocal));
+}

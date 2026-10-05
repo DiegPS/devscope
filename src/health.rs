@@ -199,8 +199,16 @@ fn detect_env_files(snapshot: &DirSnapshot) -> Vec<ProjectWarning> {
     }
     let repo = git2::Repository::discover(snapshot.root()).ok();
     let index = repo.as_ref().and_then(|r| r.index().ok());
-    let mut builder = ignore::gitignore::GitignoreBuilder::new(snapshot.root());
-    builder.add(snapshot.root().join(".gitignore"));
+    // macOS can expose /var/... while libgit2 reports /private/var/...
+    // Resolve directory aliases without resolving a tracked env symlink itself.
+    let canonical_root =
+        dunce::canonicalize(snapshot.root()).unwrap_or_else(|_| snapshot.root().to_path_buf());
+    let workdir = repo
+        .as_ref()
+        .and_then(|r| r.workdir())
+        .and_then(|path| dunce::canonicalize(path).ok());
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(&canonical_root);
+    builder.add(canonical_root.join(".gitignore"));
     let ignored = builder.build().ok();
     let mut found = Vec::new();
     for entry in candidates {
@@ -210,10 +218,9 @@ fn detect_env_files(snapshot: &DirSnapshot) -> Vec<ProjectWarning> {
         }) {
             continue;
         }
-        let path = snapshot.root().join(&entry.name);
-        let relative = repo
+        let path = canonical_root.join(&entry.name);
+        let relative = workdir
             .as_ref()
-            .and_then(|r| r.workdir())
             .and_then(|root| path.strip_prefix(root).ok());
         let tracked = relative.is_some_and(|relative| {
             index

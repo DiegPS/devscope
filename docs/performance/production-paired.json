@@ -1,0 +1,437 @@
+{
+  "original_installed_sha256": "06906287d5313233b8255d385e69875cc243158acc5db5e1f5ed1d7aacc8e9da",
+  "final_sha256": "9236b13cd81191bd369c138d470cfff480cca818e9f13b428937f19a8bb3a597",
+  "projects": 1000,
+  "paired_samples": 10,
+  "cases": {
+    "quit": {
+      "original": {
+        "samples": [
+          {
+            "first_frame_ms": 299.2470000172034,
+            "quit_process_ms": 12.800699973013252,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 2.362400002311915,
+            "scan_duration_ms": 253
+          },
+          {
+            "first_frame_ms": 303.0813000514172,
+            "quit_process_ms": 18.15419999184087,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 8.80390004022047,
+            "scan_duration_ms": 252
+          },
+          {
+            "first_frame_ms": 302.3324999958277,
+            "quit_process_ms": 25.178999989293516,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 1.914000022225082,
+            "scan_duration_ms": 253
+          },
+          {
+            "first_frame_ms": 296.41549999359995,
+            "quit_process_ms": 20.165299996733665,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 1.7502999980933964,
+            "scan_duration_ms": 255
+          },
+          {
+            "first_frame_ms": 307.93910002103075,
+            "quit_process_ms": 12.228700041305274,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 2.4148999946191907,
+            "scan_duration_ms": 259
+          },
+          {
+            "first_frame_ms": 302.83249996136874,
+            "quit_process_ms": 12.635699997190386,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 2.6021000230684876,
+            "scan_duration_ms": 257
+          },
+          {
+            "first_frame_ms": 313.35950002539903,
+            "quit_process_ms": 19.28730000508949,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 9.309299988672137,
+            "scan_duration_ms": 262
+          },
+          {
+            "first_frame_ms": 316.1674000439234,
+            "quit_process_ms": 27.58769999491051,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 2.5326000177301466,
+            "scan_duration_ms": 270
+          },
+          {
+            "first_frame_ms": 311.27129995729774,
+            "quit_process_ms": 13.0986999720335,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 2.7329999720677733,
+            "scan_duration_ms": 264
+          },
+          {
+            "first_frame_ms": 332.36400003079325,
+            "quit_process_ms": 12.415300006978214,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 2.1684999810531735,
+            "scan_duration_ms": 280
+          }
+        ],
+        "summary": {
+          "first_frame_ms": {
+            "median": 305.51,
+            "min": 296.415,
+            "max": 332.364
+          },
+          "quit_process_ms": {
+            "median": 15.626,
+            "min": 12.229,
+            "max": 27.588
+          },
+          "quit_terminal_ms": {
+            "median": 2.474,
+            "min": 1.75,
+            "max": 9.309
+          },
+          "scan_duration_ms": {
+            "median": 258.0,
+            "min": 252,
+            "max": 280
+          }
+        }
+      },
+      "final": {
+        "samples": [
+          {
+            "first_frame_ms": 313.22159996489063,
+            "quit_process_ms": 17.74380001006648,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 1.0950000141747296,
+            "scan_duration_ms": 273
+          },
+          {
+            "first_frame_ms": 304.63400000007823,
+            "quit_process_ms": 7.632300024852157,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 0.9550000540912151,
+            "scan_duration_ms": 266
+          },
+          {
+            "first_frame_ms": 310.00949995359406,
+            "quit_process_ms": 7.19909998588264,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 0.8049999596551061,
+            "scan_duration_ms": 273
+          },
+          {
+            "first_frame_ms": 314.51399996876717,
+            "quit_process_ms": 7.954300031997263,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 1.0923000518232584,
+            "scan_duration_ms": 275
+          },
+          {
+            "first_frame_ms": 324.6896000346169,
+            "quit_process_ms": 8.629599993582815,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 0.9694999898783863,
+            "scan_duration_ms": 275
+          },
+          {
+            "first_frame_ms": 333.81320000626147,
+            "quit_process_ms": 7.0757000357843935,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 0.6418999982997775,
+            "scan_duration_ms": 285
+          },
+          {
+            "first_frame_ms": 336.58489998197183,
+            "quit_process_ms": 12.961299973540008,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 0.7515000179409981,
+            "scan_duration_ms": 297
+          },
+          {
+            "first_frame_ms": 342.6851999829523,
+            "quit_process_ms": 7.554500014521182,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 0.6741000106558204,
+            "scan_duration_ms": 293
+          },
+          {
+            "first_frame_ms": 342.2331999754533,
+            "quit_process_ms": 8.010299992747605,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 0.9101000032387674,
+            "scan_duration_ms": 291
+          },
+          {
+            "first_frame_ms": 342.3683999571949,
+            "quit_process_ms": 7.887099985964596,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 0.6006999756209552,
+            "scan_duration_ms": 302
+          }
+        ],
+        "summary": {
+          "first_frame_ms": {
+            "median": 329.251,
+            "min": 304.634,
+            "max": 342.685
+          },
+          "quit_process_ms": {
+            "median": 7.921,
+            "min": 7.076,
+            "max": 17.744
+          },
+          "quit_terminal_ms": {
+            "median": 0.858,
+            "min": 0.601,
+            "max": 1.095
+          },
+          "scan_duration_ms": {
+            "median": 280.0,
+            "min": 266,
+            "max": 302
+          }
+        }
+      }
+    },
+    "reload_then_quit": {
+      "original": {
+        "samples": [
+          {
+            "first_frame_ms": 304.41380001138896,
+            "quit_process_ms": 302.31959995580837,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 289.6269999910146,
+            "scan_duration_ms": 261
+          },
+          {
+            "first_frame_ms": 299.60440000286326,
+            "quit_process_ms": 286.5477000013925,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 274.71699996385723,
+            "scan_duration_ms": 256
+          },
+          {
+            "first_frame_ms": 302.91019997093827,
+            "quit_process_ms": 308.2590999547392,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 295.6854999647476,
+            "scan_duration_ms": 259
+          },
+          {
+            "first_frame_ms": 313.07319999905303,
+            "quit_process_ms": 305.2970999851823,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 292.1277999994345,
+            "scan_duration_ms": 275
+          },
+          {
+            "first_frame_ms": 317.1438999706879,
+            "quit_process_ms": 392.17060001101345,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 373.65520000457764,
+            "scan_duration_ms": 275
+          },
+          {
+            "first_frame_ms": 298.90829999931157,
+            "quit_process_ms": 286.56679997220635,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 274.5975999860093,
+            "scan_duration_ms": 254
+          },
+          {
+            "first_frame_ms": 308.98339999839664,
+            "quit_process_ms": 284.31239997735247,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 272.13499997742474,
+            "scan_duration_ms": 265
+          },
+          {
+            "first_frame_ms": 298.4114999999292,
+            "quit_process_ms": 275.24729998549446,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 264.3586999620311,
+            "scan_duration_ms": 253
+          },
+          {
+            "first_frame_ms": 311.5506999893114,
+            "quit_process_ms": 298.88299998128787,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 287.5326999928802,
+            "scan_duration_ms": 269
+          },
+          {
+            "first_frame_ms": 294.22450001584366,
+            "quit_process_ms": 277.3882999899797,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 265.9948999644257,
+            "scan_duration_ms": 254
+          }
+        ],
+        "summary": {
+          "first_frame_ms": {
+            "median": 303.662,
+            "min": 294.225,
+            "max": 317.144
+          },
+          "quit_process_ms": {
+            "median": 292.725,
+            "min": 275.247,
+            "max": 392.171
+          },
+          "quit_terminal_ms": {
+            "median": 281.125,
+            "min": 264.359,
+            "max": 373.655
+          },
+          "scan_duration_ms": {
+            "median": 260.0,
+            "min": 253,
+            "max": 275
+          }
+        }
+      },
+      "final": {
+        "samples": [
+          {
+            "first_frame_ms": 338.5003000148572,
+            "quit_process_ms": 10.64079999923706,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 2.8090999694541097,
+            "scan_duration_ms": 288
+          },
+          {
+            "first_frame_ms": 326.1861000210047,
+            "quit_process_ms": 7.834199990611523,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 1.8285999540239573,
+            "scan_duration_ms": 283
+          },
+          {
+            "first_frame_ms": 312.87059996975586,
+            "quit_process_ms": 8.007900032680482,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 1.9144000252708793,
+            "scan_duration_ms": 276
+          },
+          {
+            "first_frame_ms": 328.4459999995306,
+            "quit_process_ms": 10.366500006057322,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 2.27719999384135,
+            "scan_duration_ms": 276
+          },
+          {
+            "first_frame_ms": 336.5681000286713,
+            "quit_process_ms": 8.206099970266223,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 2.140299999155104,
+            "scan_duration_ms": 293
+          },
+          {
+            "first_frame_ms": 314.93139994563535,
+            "quit_process_ms": 8.8246000232175,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 2.334600023459643,
+            "scan_duration_ms": 271
+          },
+          {
+            "first_frame_ms": 335.16550000058487,
+            "quit_process_ms": 9.390700026415288,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 1.7158000264316797,
+            "scan_duration_ms": 287
+          },
+          {
+            "first_frame_ms": 311.81819998892024,
+            "quit_process_ms": 7.808299968019128,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 1.956899999640882,
+            "scan_duration_ms": 273
+          },
+          {
+            "first_frame_ms": 319.1190999932587,
+            "quit_process_ms": 8.413900039158762,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 2.218100009486079,
+            "scan_duration_ms": 282
+          },
+          {
+            "first_frame_ms": 313.03630000911653,
+            "quit_process_ms": 10.918500018306077,
+            "exit_code": 0,
+            "terminal_restored": true,
+            "quit_terminal_ms": 3.215900040231645,
+            "scan_duration_ms": 261
+          }
+        ],
+        "summary": {
+          "first_frame_ms": {
+            "median": 322.653,
+            "min": 311.818,
+            "max": 338.5
+          },
+          "quit_process_ms": {
+            "median": 8.619,
+            "min": 7.808,
+            "max": 10.919
+          },
+          "quit_terminal_ms": {
+            "median": 2.179,
+            "min": 1.716,
+            "max": 3.216
+          },
+          "scan_duration_ms": {
+            "median": 279.0,
+            "min": 261,
+            "max": 293
+          }
+        }
+      }
+    }
+  },
+  "config_unchanged": true
+}

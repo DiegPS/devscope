@@ -63,3 +63,19 @@ python scripts/bench_tui.py tui-nombre-de-version
 ```
 
 Los scripts guardan resultados en target/bench-reports/. Para comparaciones posteriores, guardar los JSON antes de la modificación y repetir con el mismo conjunto, toolchain y equipo. Los perfiles Cargo personalizados y detección exhaustiva de todos los triples/targets no se infieren mediante cargo metadata: no se ejecuta el build system de proyectos ajenos durante el escaneo.
+
+## Verificacion adicional del ejecutable de produccion
+
+Se conservaron el ejecutable instalado original y el release de d169c0b y se compararon diez pares, alternando el orden A/B, en la misma fixture. La configuracion personal mantuvo el mismo hash. Esta comprobacion usa los binarios reales y evita mezclar medidas del harness con produccion.
+
+| Mediana | Original instalado | Release d169c0b |
+| --- | ---: | ---: |
+| Primer cuadro, caso q | 305,51 ms | 329,25 ms |
+| q hasta terminar proceso | 15,63 ms | 7,92 ms |
+| r seguido de q hasta terminar | 292,73 ms | 8,62 ms |
+
+Respecto al ejecutable original, **abrir es aproximadamente 24 ms mas lento** en esta muestra grande; cerrar normalmente es aproximadamente 8 ms mas rapido y cerrar durante recarga mejora aproximadamente 97%. El coste de revisar fuentes reales no se oculta tras la comparacion anterior, que comenzaba justo antes del punto 5. Los hashes y muestras estan en production-paired.json.
+
+## Correccion encontrada por CI de macOS
+
+La prueba de env versionado detecto una diferencia entre /var y /private/var en temporales de macOS. Se canonicaliza el directorio de trabajo antes de calcular el path del indice, manteniendo intacto el nombre del archivo env. Se conserva el test y se agrega un contrato Unix con un alias symlink a un repositorio. ci-macos-env-path.json guarda la comparacion de velocidad de esta reparacion adicional. La rama de env no se ejecuta en la fixture de velocidad; las diferencias pequenas entre tandas no se atribuyen a ese ajuste.
