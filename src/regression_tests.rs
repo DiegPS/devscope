@@ -20,6 +20,78 @@ fn write(root: &Path, name: &str, content: &str) {
     fs::write(path, content).unwrap();
 }
 
+#[test]
+#[ignore = "large reproducible performance fixture; run scripts/bench_scan.py"]
+fn benchmark_scan_fixture() {
+    use std::time::Instant;
+    let root =
+        std::path::PathBuf::from(std::env::var("DS_BENCH_ROOT").expect("owned benchmark root"));
+    if !root.join("ready").exists() {
+        for i in 0..1000 {
+            let path = root.join(format!("group-{}/project-{i:04}", i % 10));
+            fs::create_dir_all(path.join("src/nested")).unwrap();
+            let (marker, content) = match i % 4 {
+                0 => ("Cargo.toml", "[package]\nname='bench-project'\nversion='0.1.0'\n"),
+                1 => ("package.json", "{\"name\":\"bench-project\",\"scripts\":{\"dev\":\"vite\",\"test\":\"vitest\"},\"dependencies\":{\"react\":\"1\"}}"),
+                2 => ("pyproject.toml", "[project]\nname='bench-project'\nversion='0.1.0'\n"),
+                _ => ("go.mod", "module example.com/bench\ngo 1.22\n"),
+            };
+            fs::write(path.join(marker), content).unwrap();
+            fs::write(path.join("README.md"), "Benchmark fixture").unwrap();
+            fs::write(path.join(".gitignore"), "target/\nnode_modules/\n").unwrap();
+            for n in 0..16 {
+                fs::write(
+                    path.join(format!("src/nested/file-{n}.txt")),
+                    "source contents\n",
+                )
+                .unwrap();
+            }
+            fs::create_dir_all(path.join("node_modules/ignored")).unwrap();
+            fs::write(path.join("node_modules/ignored/package.json"), "{}").unwrap();
+            if i % 5 == 0 {
+                let repo = git2::Repository::init(&path).unwrap();
+                let mut index = repo.index().unwrap();
+                index.add_path(Path::new("README.md")).unwrap();
+                index.write().unwrap();
+                let oid = index.write_tree().unwrap();
+                let tree = repo.find_tree(oid).unwrap();
+                let sig = git2::Signature::new(
+                    "Benchmark",
+                    "bench@example.invalid",
+                    &git2::Time::new(1700000000, 0),
+                )
+                .unwrap();
+                repo.commit(Some("HEAD"), &sig, &sig, "fixture", &tree, &[])
+                    .unwrap();
+            }
+        }
+        fs::write(
+            root.join("ready"),
+            "1000 projects; 200 Git repos; 16000 source files",
+        )
+        .unwrap();
+    }
+    let config = Config {
+        roots: vec![root.to_string_lossy().into_owned()],
+        ..Config::default()
+    };
+    for _ in 0..3 {
+        let mut result = scanner::scan_roots(&config).unwrap();
+        scanner::hydrate_git_statuses(&mut result.projects);
+    }
+    let mut rows = Vec::new();
+    for _ in 0..20 {
+        let start = Instant::now();
+        let mut result = scanner::scan_roots(&config).unwrap();
+        let scan = start.elapsed().as_secs_f64() * 1000.;
+        let count = result.projects.len();
+        assert_eq!(count, 1000);
+        scanner::hydrate_git_statuses(&mut result.projects);
+        rows.push(serde_json::json!({"scan_ms":scan,"full_scan_ms":start.elapsed().as_secs_f64()*1000.,"projects":count}));
+    }
+    println!("DS_BENCH_JSON={}", serde_json::to_string(&rows).unwrap());
+}
+
 fn fixture() -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();
     for name in ["alpha", "beta", "gamma"] {
