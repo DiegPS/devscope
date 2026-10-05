@@ -1367,3 +1367,41 @@ fn saved_config_starts_private_and_preserves_existing_unix_permissions() {
         0o640
     );
 }
+
+#[test]
+fn scanner_obeys_options_exact_depth_and_nested_workspace_members() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in [
+        "mono",
+        "mono/member",
+        "mono/member/deep",
+        ".hidden",
+        "ignored",
+    ] {
+        write(
+            dir.path(),
+            &format!("{name}/Cargo.toml"),
+            "[package]\nname='test'",
+        );
+    }
+    write(dir.path(), ".gitignore", "ignored/\n");
+    let mut config = Config {
+        roots: vec![dir.path().to_string_lossy().into_owned()],
+        max_depth: 1,
+        ..Config::default()
+    };
+    assert_eq!(scanner::scan_roots(&config).unwrap().projects_found, 1);
+    config.max_depth = 2;
+    assert_eq!(scanner::scan_roots(&config).unwrap().projects_found, 2);
+    assert_eq!(
+        crate::discover::count_projects_under(dir.path(), 2).unwrap(),
+        2
+    );
+    config.scan_hidden = true;
+    config.respect_gitignore = false;
+    assert_eq!(scanner::scan_roots(&config).unwrap().projects_found, 4);
+    config.max_depth = 0;
+    assert_eq!(scanner::scan_roots(&config).unwrap().projects_found, 0);
+    write(dir.path(), "Cargo.toml", "[workspace]");
+    assert_eq!(scanner::scan_roots(&config).unwrap().projects_found, 1);
+}

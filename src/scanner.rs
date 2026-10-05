@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use anyhow::Result;
@@ -184,109 +184,70 @@ pub fn recompute_project_health(project: &mut Project) {
 }
 
 fn scan_single_root(root: &Path, config: &Config) -> Result<Vec<Project>> {
-    // Check if the root itself is a project
-    let mut projects = Vec::new();
-    let mut visited = HashSet::new();
-
-    if is_project(root) {
-        if let Some(project) = analyze_project(root, config) {
-            visited.insert(root.to_path_buf());
-            projects.push(project);
-            // If root is a project, still scan subdirectories for monorepo-like structures
-        }
-    }
-
-    // Walk subdirectories
-    let subdirs = collect_subdirs(root, config.max_depth, &mut visited);
-    let new_projects: Vec<Project> = subdirs
+    let paths = collect_project_paths(root, config)?;
+    Ok(paths
         .par_iter()
         .filter_map(|path| analyze_project(path, config))
-        .collect();
-
-    projects.extend(new_projects);
-    Ok(projects)
+        .collect())
 }
 
-fn collect_subdirs(root: &Path, max_depth: usize, visited: &mut HashSet<PathBuf>) -> Vec<PathBuf> {
-    let root = root.to_path_buf();
-    let visited_snapshot = visited.clone();
-    let discovered = Arc::new(Mutex::new(HashSet::new()));
-    let output = Arc::new(Mutex::new(Vec::new()));
-
-    let mut builder = WalkBuilder::new(&root);
+/// One traversal policy for discovery and analysis. Root depth is zero;
+/// project markers do not prune workspace members underneath a project.
+pub(crate) fn collect_project_paths(root: &Path, config: &Config) -> Result<Vec<PathBuf>> {
+    let mut builder = WalkBuilder::new(root);
     builder
-        .max_depth(Some(max_depth.saturating_add(1)))
-        .hidden(false)
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .follow_links(false);
-
-    builder.filter_entry({
-        let root = root.clone();
-        let discovered = Arc::clone(&discovered);
-        let output = Arc::clone(&output);
-        move |entry| {
-            if !entry.file_type().is_some_and(|ft| ft.is_dir()) {
-                return true;
-            }
-
-            let path = entry.path();
-            if path == root {
-                return true;
-            }
-
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy())
-                .unwrap_or_default();
-
-            if name.starts_with('.') && name != ".git" {
-                return false;
-            }
-
-            if SKIP_DIRS.contains(&name.as_ref()) {
-                return false;
-            }
-
-            if visited_snapshot.contains(path)
-                || discovered
-                    .lock()
-                    .expect("project-discovery mutex poisoned")
-                    .contains(path)
-            {
-                return false;
-            }
-
-            if is_project(path) {
-                let path_buf = path.to_path_buf();
-                discovered
-                    .lock()
-                    .expect("project-discovery mutex poisoned")
-                    .insert(path_buf.clone());
-                output
-                    .lock()
-                    .expect("project-output mutex poisoned")
-                    .push(path_buf);
-                return false;
-            }
-
-            true
-        }
+        .max_depth(Some(config.max_depth))
+        .hidden(!config.scan_hidden)
+        .ignore(config.respect_gitignore)
+        .git_ignore(config.respect_gitignore)
+        .git_global(config.respect_gitignore)
+        .git_exclude(config.respect_gitignore)
+        .require_git(false)
+        .follow_links(config.follow_symlinks);
+    builder.filter_entry(|entry| {
+        entry.depth() == 0
+            || (entry.file_type().is_some_and(|ft| ft.is_dir())
+                && !SKIP_DIRS.contains(&entry.file_name().to_string_lossy().as_ref()))
     });
-
-    for entry in builder.build() {
-        if entry.is_err() {
-            continue;
-        }
+    let paths = std::sync::Mutex::new(Vec::new());
+    let error = std::sync::Mutex::new(None);
+    builder.threads(std::thread::available_parallelism().map_or(2, |n| n.get().min(8)));
+    builder.build_parallel().run(|| {
+        Box::new(|entry| {
+            match entry {
+                Ok(entry)
+                    if entry.file_type().is_some_and(|ft| ft.is_dir())
+                        && is_project(entry.path()) =>
+                {
+                    paths.lock().expect("paths lock").push(entry.into_path());
+                }
+                Err(e) => {
+                    *error.lock().expect("error lock") = Some(e);
+                }
+                _ => {}
+            }
+            ignore::WalkState::Continue
+        })
+    });
+    if let Some(error) = error.into_inner().expect("error lock") {
+        return Err(error.into());
     }
+    let mut paths: Vec<_> = paths
+        .into_inner()
+        .expect("paths lock")
+        .par_iter()
+        .map(|path| {
+            if config.follow_symlinks {
+                PathBuf::from(crate::config::project_key(path))
+            } else {
+                path.clone()
+            }
+        })
+        .collect();
+    paths.sort();
+    paths.dedup();
 
-    let dirs = output
-        .lock()
-        .expect("project-output mutex poisoned")
-        .clone();
-    visited.extend(dirs.iter().cloned());
-    dirs
+    Ok(paths)
 }
 
 fn project_markers_set() -> &'static HashSet<&'static str> {

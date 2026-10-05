@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 
@@ -181,6 +180,7 @@ fn is_system_protected(path: &Path) -> bool {
 
 /// Check if a directory should be skipped during discovery.
 /// Reuses the scanner's skip list for consistency.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn should_skip_dir(path: &Path) -> bool {
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
         return crate::scanner::SKIP_DIRS.contains(&name);
@@ -190,50 +190,26 @@ pub fn should_skip_dir(path: &Path) -> bool {
 
 /// Check if a directory looks like a project (has known marker files).
 /// Reuses the scanner's project detection for consistency.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn looks_like_project_dir(path: &Path) -> bool {
     crate::scanner::is_project(path)
 }
 
 /// Count how many projects exist under a root directory, up to max_depth.
 /// Uses the `ignore` crate for efficient, .gitignore-aware walking.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn count_projects_under(root: &Path, max_depth: usize) -> Result<usize> {
-    let count = std::sync::Arc::new(AtomicUsize::new(0));
-    let count_clone = count.clone();
+    count_projects_with_config(
+        root,
+        &Config {
+            max_depth,
+            ..Config::default()
+        },
+    )
+}
 
-    let mut builder = ignore::WalkBuilder::new(root);
-    builder
-        .max_depth(Some(max_depth))
-        .git_ignore(true)
-        .git_exclude(true)
-        .git_global(true)
-        .follow_links(false);
-
-    builder.filter_entry(move |entry| {
-        if !entry.file_type().is_some_and(|ft| ft.is_dir()) {
-            return true;
-        }
-
-        let path = entry.path();
-
-        if looks_like_project_dir(path) {
-            count_clone.fetch_add(1, Ordering::Relaxed);
-            return false;
-        }
-
-        if should_skip_dir(path) {
-            return false;
-        }
-
-        true
-    });
-
-    for result in builder.build() {
-        if result.is_err() {
-            continue;
-        }
-    }
-
-    Ok(count.load(Ordering::Relaxed))
+fn count_projects_with_config(root: &Path, config: &Config) -> Result<usize> {
+    Ok(crate::scanner::collect_project_paths(root, config)?.len())
 }
 
 /// Discover potential project roots from common candidate locations.
@@ -250,13 +226,7 @@ fn discover_from_candidates(
     let mut results = Vec::new();
 
     for candidate in candidates {
-        let depth = if is_high_confidence_path(candidate) {
-            config.max_depth.max(4)
-        } else {
-            2
-        };
-
-        let count = count_projects_under(candidate, depth).unwrap_or(0);
+        let count = count_projects_with_config(candidate, config)?;
         if count > 0 {
             results.push(DiscoveredRoot {
                 path: candidate.clone(),
@@ -269,7 +239,7 @@ fn discover_from_candidates(
     results.sort_by(|a, b| {
         b.project_count
             .cmp(&a.project_count)
-            .then_with(|| a.confidence.cmp(&b.confidence))
+            .then_with(|| b.confidence.cmp(&a.confidence))
             .then_with(|| a.path.cmp(&b.path))
     });
 
