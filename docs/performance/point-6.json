@@ -1,0 +1,123 @@
+{
+  "label": "point-6",
+  "projects": 1000,
+  "git_repos": 200,
+  "source_files": 16000,
+  "warmups": 3,
+  "samples": [
+    {
+      "full_scan_ms": 438.7231,
+      "projects": 1000,
+      "scan_ms": 282.736
+    },
+    {
+      "full_scan_ms": 434.6377,
+      "projects": 1000,
+      "scan_ms": 280.92679999999996
+    },
+    {
+      "full_scan_ms": 428.1564,
+      "projects": 1000,
+      "scan_ms": 275.8035
+    },
+    {
+      "full_scan_ms": 424.002,
+      "projects": 1000,
+      "scan_ms": 271.3017
+    },
+    {
+      "full_scan_ms": 437.0748,
+      "projects": 1000,
+      "scan_ms": 280.9554
+    },
+    {
+      "full_scan_ms": 431.0525,
+      "projects": 1000,
+      "scan_ms": 280.00199999999995
+    },
+    {
+      "full_scan_ms": 466.305,
+      "projects": 1000,
+      "scan_ms": 296.7353
+    },
+    {
+      "full_scan_ms": 445.9298,
+      "projects": 1000,
+      "scan_ms": 283.1272
+    },
+    {
+      "full_scan_ms": 434.3723,
+      "projects": 1000,
+      "scan_ms": 280.3246
+    },
+    {
+      "full_scan_ms": 441.4846,
+      "projects": 1000,
+      "scan_ms": 285.122
+    },
+    {
+      "full_scan_ms": 450.74019999999996,
+      "projects": 1000,
+      "scan_ms": 289.48699999999997
+    },
+    {
+      "full_scan_ms": 441.99870000000004,
+      "projects": 1000,
+      "scan_ms": 280.4008
+    },
+    {
+      "full_scan_ms": 454.8184,
+      "projects": 1000,
+      "scan_ms": 286.5644
+    },
+    {
+      "full_scan_ms": 458.54859999999996,
+      "projects": 1000,
+      "scan_ms": 303.7599
+    },
+    {
+      "full_scan_ms": 450.8914,
+      "projects": 1000,
+      "scan_ms": 294.8709
+    },
+    {
+      "full_scan_ms": 454.8142,
+      "projects": 1000,
+      "scan_ms": 290.9588
+    },
+    {
+      "full_scan_ms": 453.7472,
+      "projects": 1000,
+      "scan_ms": 286.6379
+    },
+    {
+      "full_scan_ms": 431.2864,
+      "projects": 1000,
+      "scan_ms": 274.2554
+    },
+    {
+      "full_scan_ms": 442.3873,
+      "projects": 1000,
+      "scan_ms": 283.4074
+    },
+    {
+      "full_scan_ms": 441.064,
+      "projects": 1000,
+      "scan_ms": 278.7015
+    }
+  ],
+  "summary": {
+    "scan_ms": {
+      "median": 282.9316,
+      "p95": 296.7353,
+      "min": 271.3017,
+      "max": 303.7599
+    },
+    "full_scan_ms": {
+      "median": 441.74165000000005,
+      "p95": 458.54859999999996,
+      "min": 424.002,
+      "max": 466.305
+    }
+  }
+}

@@ -102,25 +102,21 @@ pub(crate) fn compute_health_with_snapshot(
         }
 
         if git_info.dirty_status == DirtyStatus::Dirty {
-            score -= 12;
             warnings.push(ProjectWarning::DirtyWorkingTree);
             let total = git_info
                 .modified_count
                 .unwrap_or(0)
                 .saturating_add(git_info.untracked_count.unwrap_or(0));
             if total > 10 {
-                score -= 8;
                 warnings.push(ProjectWarning::ManyUncommittedChanges(total));
             }
         }
 
         if git_info.upstream.is_none() && git_info.has_remote {
-            score -= 5;
             warnings.push(ProjectWarning::NoUpstream);
         }
 
         if !git::is_mainline_branch(&git_info.branch) {
-            score -= 7;
             warnings.push(ProjectWarning::NonMainlineBranch(git_info.branch.clone()));
         }
 
@@ -131,7 +127,6 @@ pub(crate) fn compute_health_with_snapshot(
                 warnings.push(ProjectWarning::BranchDiverged);
             }
             (Some(a), _) if a > 0 => {
-                score -= 3;
                 warnings.push(ProjectWarning::BranchAhead);
             }
             (_, Some(b)) if b > 0 => {
@@ -194,18 +189,54 @@ fn health_level(score: u8) -> HealthLevel {
 
 /// Detect .env files by checking existence only (never read contents).
 fn detect_env_files(snapshot: &DirSnapshot) -> Vec<ProjectWarning> {
+    let candidates: Vec<_> = snapshot
+        .entries()
+        .iter()
+        .filter(|entry| entry.is_file && (entry.name == ".env" || entry.name.starts_with(".env.")))
+        .collect();
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+    let repo = git2::Repository::discover(snapshot.root()).ok();
+    let index = repo.as_ref().and_then(|r| r.index().ok());
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(snapshot.root());
+    builder.add(snapshot.root().join(".gitignore"));
+    let ignored = builder.build().ok();
     let mut found = Vec::new();
-
-    for entry in snapshot.entries() {
-        if entry.name == ".env" {
-            found.push(ProjectWarning::EnvFilePresent);
-        } else if let Some(suffix) = entry.name.strip_prefix(".env.") {
-            match suffix {
-                "local" => found.push(ProjectWarning::EnvFileLocal),
-                "production" => found.push(ProjectWarning::EnvFileProduction),
-                _ => found.push(ProjectWarning::EnvFileCustom(suffix.to_string())),
-            }
+    for entry in candidates {
+        let suffix = entry.name.strip_prefix(".env.");
+        if suffix.is_some_and(|s| {
+            ["example", "sample", "template"].contains(&s) || s.ends_with(".example")
+        }) {
+            continue;
         }
+        let path = snapshot.root().join(&entry.name);
+        let relative = repo
+            .as_ref()
+            .and_then(|r| r.workdir())
+            .and_then(|root| path.strip_prefix(root).ok());
+        let tracked = relative.is_some_and(|relative| {
+            index
+                .as_ref()
+                .is_some_and(|i| i.get_path(relative, 0).is_some())
+        });
+        let is_ignored = if let (Some(repo), Some(relative)) = (&repo, relative) {
+            repo.status_should_ignore(relative).unwrap_or(false)
+        } else {
+            ignored
+                .as_ref()
+                .is_some_and(|ignore| ignore.matched_path_or_any_parents(&path, false).is_ignore())
+        };
+        // Ignore rules do not protect a file already tracked in Git.
+        if is_ignored && !tracked {
+            continue;
+        }
+        found.push(match suffix {
+            None => ProjectWarning::EnvFilePresent,
+            Some("local") => ProjectWarning::EnvFileLocal,
+            Some("production") => ProjectWarning::EnvFileProduction,
+            Some(other) => ProjectWarning::EnvFileCustom(other.to_owned()),
+        });
     }
 
     found
@@ -450,7 +481,7 @@ mod tests {
             .warnings
             .iter()
             .any(|w| matches!(w, ProjectWarning::NoRemote)));
-        assert_eq!(health.score, 68);
+        assert_eq!(health.score, 88);
     }
 
     #[test]

@@ -615,7 +615,11 @@ mod tests {
         let git = project.git.as_ref().unwrap();
         assert_eq!(git.dirty_status, DirtyStatus::Dirty);
         assert_eq!(git.modified_count, Some(1));
-        assert!(project.health.score < before_score);
+        assert_eq!(project.health.score, before_score);
+        assert!(project
+            .health
+            .warnings
+            .contains(&crate::project::ProjectWarning::DirtyWorkingTree));
         assert!(matches!(
             project.health.level,
             HealthLevel::Good | HealthLevel::Warn | HealthLevel::Bad

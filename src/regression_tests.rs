@@ -1548,3 +1548,41 @@ fn cancelled_scan_exits_without_publishing_partial_results() {
     )
     .is_err());
 }
+
+#[test]
+fn health_does_not_penalize_normal_git_work_and_ignored_env_but_flags_tracked_env() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    write(dir.path(), "README.md", "docs");
+    write(dir.path(), ".gitignore", ".env*\n");
+    write(dir.path(), ".env.local", "never read secrets");
+    write(dir.path(), ".env.example", "template");
+    let mut git = crate::git::get_git_info_fast(dir.path()).unwrap();
+    git.has_remote = true;
+    git.branch = "main".into();
+    git.upstream = Some("origin/main".into());
+    git.dirty_status = DirtyStatus::Clean;
+    let timestamp = Some(chrono::Utc::now().timestamp());
+    let clean = crate::health::compute_health(dir.path(), &Some(git.clone()), timestamp, true);
+    git.branch = "feature/work".into();
+    git.dirty_status = DirtyStatus::Dirty;
+    git.modified_count = Some(20);
+    git.upstream = None;
+    git.ahead = Some(3);
+    git.behind = Some(0);
+    let working = crate::health::compute_health(dir.path(), &Some(git), timestamp, true);
+    assert_eq!(clean.score, working.score);
+    assert!(working
+        .warnings
+        .contains(&crate::project::ProjectWarning::DirtyWorkingTree));
+    assert!(!working
+        .warnings
+        .contains(&crate::project::ProjectWarning::EnvFileLocal));
+    let mut index = repo.index().unwrap();
+    index.add_path(Path::new(".env.local")).unwrap();
+    index.write().unwrap();
+    let tracked = crate::health::compute_health(dir.path(), &None, timestamp, true);
+    assert!(tracked
+        .warnings
+        .contains(&crate::project::ProjectWarning::EnvFileLocal));
+}
