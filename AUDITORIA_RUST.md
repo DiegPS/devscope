@@ -1,5 +1,7 @@
 # Auditoría de ds / devscope
 
+> Actualización 2026-10-05: las correcciones de los siete grupos pendientes están documentadas con mediciones por commit en [docs/performance/README.md](docs/performance/README.md). Este análisis conserva las observaciones de su revisión original; la recarga ya funciona en segundo plano, la salud se calcula fuera del hilo de entrada y el dibujo responde a cambios.
+
 ## Segunda tanda: pendientes internos resueltos
 
 Se retomaron los ajustes internos de los hallazgos 16, 22 y 24, manteniendo el diseño, los comandos, el formato JSON/TOML y las dependencias:

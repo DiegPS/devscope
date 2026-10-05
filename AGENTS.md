@@ -55,8 +55,10 @@ Help scrolls with arrows/j/k, PageUp/PageDown and Home/End. Open/config menus su
 
 ## Gotchas
 - `git2` (libgit2) requires CMake + a C compiler on most platforms
-- Scanner skips 50 dir names (node_modules, target, .git, dist, etc.) — see `SKIP_DIRS` in `scanner.rs`
+- Scanner skips 35 dir names (node_modules, target, .git, dist, etc.) — see `SKIP_DIRS` in `scanner.rs`
 - Project detection requires explicit marker files (e.g. `.git`, `package.json`, `Cargo.toml`); dirs without markers are not treated as projects
 - Config auto-saves on first run if roots are empty and auto-discovery finds anything
 - `open` command is MVP — just prints the path, doesn't launch an editor/file manager
-- `cargo test` has zero prerequisites; all tests are pure unit tests using `tempfile`
+- Rust MSRV: 1.89. `cargo test` needs no external services; tests use owned tempfile fixtures and a test-only child process.
+- Scanner options control hidden paths, ignore rules and symlinks; root depth is zero. Discovery shares the same traversal policy.
+- Manual reload runs in a worker, coalesces repeated requests and preserves the current list until completion.

@@ -9,12 +9,24 @@ use crate::project::{DirtyStatus, GitInfo};
 pub fn get_git_info_fast(repo_path: &Path) -> Result<GitInfo> {
     let repo = Repository::open(repo_path)?;
 
-    let branch = get_current_branch(&repo);
-    let (last_hash, last_message, last_date, last_timestamp) = get_last_commit_info(&repo);
+    // Share one HEAD/commit snapshot across all derived fields.
+    let head = repo.head().ok();
+    let commit = head.as_ref().and_then(|head| head.peel_to_commit().ok());
+    let branch = head
+        .as_ref()
+        .and_then(|head| head.shorthand())
+        .unwrap_or("detached")
+        .to_owned();
+    let (last_hash, last_message, last_date, last_timestamp) =
+        get_last_commit_info(commit.as_ref());
     let remote_url = get_remote_url(&repo);
 
-    let upstream = get_upstream_branch(&repo);
-    let (ahead, behind) = get_ahead_behind(&repo, &upstream);
+    let upstream_ref = get_upstream_branch(&repo, head.as_ref());
+    let upstream = upstream_ref
+        .as_ref()
+        .and_then(|reference| reference.shorthand())
+        .map(str::to_owned);
+    let (ahead, behind) = get_ahead_behind(&repo, commit.as_ref(), upstream_ref.as_ref());
 
     let has_remote = remote_url.is_some();
     let (remote_host, remote_repo) = parse_remote_info(remote_url.as_deref());
@@ -52,74 +64,36 @@ pub fn get_git_status(repo_path: &Path) -> Result<(DirtyStatus, Option<usize>, O
     Ok((status, Some(modified), Some(untracked)))
 }
 
-fn get_current_branch(repo: &Repository) -> String {
-    repo.head()
-        .ok()
-        .and_then(|head| head.shorthand().map(String::from))
-        .unwrap_or_else(|| "detached".to_string())
-}
-
-fn get_upstream_branch(repo: &Repository) -> Option<String> {
-    let head = repo.head().ok()?;
-    let branch = git2::Branch::wrap(head);
-    let upstream = branch.upstream().ok()?;
-    let name = upstream.name().ok()??; // Result<Option<&str>>
-    Some(name.to_string())
+fn get_upstream_branch<'repo>(
+    repo: &'repo Repository,
+    head: Option<&git2::Reference<'repo>>,
+) -> Option<git2::Reference<'repo>> {
+    let name = repo.branch_upstream_name(head?.name()?).ok()?;
+    repo.find_reference(name.as_str()?).ok()
 }
 
 fn get_ahead_behind(
     repo: &Repository,
-    upstream_name: &Option<String>,
+    commit: Option<&git2::Commit<'_>>,
+    upstream: Option<&git2::Reference<'_>>,
 ) -> (Option<usize>, Option<usize>) {
-    let upstream_name = match upstream_name {
-        Some(name) => name,
-        None => return (None, None),
+    let (Some(commit), Some(upstream)) = (commit, upstream) else {
+        return (None, None);
     };
-
-    let head = match repo.head().ok().and_then(|h| h.peel_to_commit().ok()) {
-        Some(c) => c,
-        None => return (None, None),
+    let Some(upstream_commit) = upstream.peel_to_commit().ok() else {
+        return (None, None);
     };
-    let local_oid = head.id();
-
-    let upstream_ref = match repo.find_reference(&format!("refs/remotes/{}", upstream_name)) {
-        Ok(r) => r,
-        Err(_) => return (None, None),
-    };
-    let upstream_oid = match upstream_ref.peel_to_commit().ok() {
-        Some(c) => c.id(),
-        None => return (None, None),
-    };
-
-    match repo.graph_ahead_behind(local_oid, upstream_oid) {
-        Ok((a, b)) => (Some(a), Some(b)),
+    match repo.graph_ahead_behind(commit.id(), upstream_commit.id()) {
+        Ok((ahead, behind)) => (Some(ahead), Some(behind)),
         Err(_) => (None, None),
     }
 }
 
-fn get_last_commit_info(repo: &Repository) -> (String, String, String, Option<i64>) {
-    let head = match repo.head() {
-        Ok(head) => head,
-        Err(_) => {
-            return (
-                "none".to_string(),
-                "no commits".to_string(),
-                String::new(),
-                None,
-            )
-        }
-    };
-
-    let commit = match head.peel_to_commit() {
-        Ok(commit) => commit,
-        Err(_) => {
-            return (
-                "none".to_string(),
-                "no commits".to_string(),
-                String::new(),
-                None,
-            )
-        }
+fn get_last_commit_info(
+    commit: Option<&git2::Commit<'_>>,
+) -> (String, String, String, Option<i64>) {
+    let Some(commit) = commit else {
+        return ("none".into(), "no commits".into(), String::new(), None);
     };
 
     let hash = commit.id().to_string().chars().take(7).collect::<String>();

@@ -189,8 +189,7 @@ pub fn recompute_project_health(project: &mut Project) {
         project.activity.timestamp,
         !project.commands.is_empty(),
     );
-    project.warnings = health.warnings.clone();
-    project.health = health;
+    project.replace_health(health);
 }
 
 fn scan_single_root(
@@ -303,7 +302,13 @@ pub(crate) fn is_project(dir: &Path) -> bool {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        if markers.contains(name_str.as_ref()) {
+        if markers.contains(name_str.as_ref())
+            && entry.file_type().is_ok_and(|ft| {
+                ft.is_file()
+                    || (name_str == ".git" && ft.is_dir())
+                    || (ft.is_symlink() && entry.path().is_file())
+            })
+        {
             return true;
         }
 

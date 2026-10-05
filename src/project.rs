@@ -260,6 +260,14 @@ pub struct Project {
     pub ports: Vec<u16>,
 }
 
+impl Project {
+    /// Keep the two established JSON fields synchronized at every update.
+    pub(crate) fn replace_health(&mut self, health: ProjectHealth) {
+        self.warnings = health.warnings.clone();
+        self.health = health;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ProjectStatus;

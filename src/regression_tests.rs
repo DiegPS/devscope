@@ -1586,3 +1586,168 @@ fn health_does_not_penalize_normal_git_work_and_ignored_env_but_flags_tracked_en
         .warnings
         .contains(&crate::project::ProjectWarning::EnvFileLocal));
 }
+
+#[test]
+fn config_rejects_ambiguous_action_keys_and_invalid_status_without_overwriting_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    config::save_config_at(&Config::default(), &path).unwrap();
+    let before = fs::read(&path).unwrap();
+    for key in ["", "xy", " ", "O"] {
+        let mut config = Config::default();
+        config.open.actions[1].key = key.into();
+        assert!(config::save_config_at(&config, &path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), before);
+    }
+    assert!(toml::from_str::<Config>("[project_status]\nproject='typo'").is_err());
+    let config: Config = toml::from_str("[project_status]\nproject='paused'").unwrap();
+    assert_eq!(config.project_status["project"], ProjectStatus::Paused);
+    assert!(toml::to_string(&config).unwrap().contains("paused"));
+}
+
+#[test]
+fn config_lock_serializes_real_concurrent_writers_without_losing_increments() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    config::save_config_at(&Config::default(), &path).unwrap();
+    let base = config::with_test_config_path(path.clone(), || config::load_config().unwrap());
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(12));
+    let threads: Vec<_> = (0..12)
+        .map(|i| {
+            let mut updated = base.clone();
+            let path = path.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                updated
+                    .notes
+                    .insert(format!("project-{i}"), "preserved".into());
+                config::record_visit(&mut updated, "shared");
+                barrier.wait();
+                config::save_config_at(&updated, &path).unwrap();
+            })
+        })
+        .collect();
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    let saved = config::with_test_config_path(path, || config::load_config().unwrap());
+    assert_eq!(saved.notes.len(), 12);
+    assert_eq!(saved.scores["shared"].visits, 12);
+}
+
+#[test]
+fn migrated_history_is_not_added_twice_by_concurrent_first_saves() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "project/Cargo.toml", "[package]");
+    let canonical = config::project_key(&dir.path().join("project"));
+    let alias = dir
+        .path()
+        .join("project/../project")
+        .to_string_lossy()
+        .into_owned();
+    let path = dir.path().join("config.toml");
+    let mut initial = Config::default();
+    initial.scores.insert(
+        alias,
+        scoring::ScoreEntry {
+            visits: 7,
+            opens: 3,
+            last_used: Some(1),
+        },
+    );
+    config::save_config_at(&initial, &path).unwrap();
+    config::with_test_config_path(path.clone(), || {
+        let mut first = config::load_config().unwrap();
+        let mut second = config::load_config().unwrap();
+        config::record_visit(&mut first, &canonical);
+        config::record_visit(&mut second, &canonical);
+        config::save_config(&first).unwrap();
+        config::save_config(&second).unwrap();
+        let saved = config::load_config().unwrap();
+        assert_eq!(saved.scores[&canonical].visits, 9);
+        assert_eq!(saved.scores[&canonical].opens, 3);
+    });
+}
+
+#[test]
+fn explicit_main_target_has_no_phantom_package_binary_and_marker_directories_are_not_projects() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir(dir.path().join("package.json")).unwrap();
+    assert!(!scanner::is_project(dir.path()));
+    write(
+        dir.path(),
+        "Cargo.toml",
+        "[package]\nname='devscope'\n[[bin]]\nname='ds'\npath='src/main.rs'",
+    );
+    write(dir.path(), "src/main.rs", "fn main() {}");
+    let artifacts = crate::artifacts::detect_artifacts(dir.path(), &["Rust".into()]);
+    assert_eq!(
+        artifacts
+            .iter()
+            .filter(|a| a.kind == ArtifactKind::Executable)
+            .count(),
+        2
+    );
+    assert!(artifacts
+        .iter()
+        .filter(|a| a.kind == ArtifactKind::Executable)
+        .all(|a| a.path.file_stem().unwrap() == "ds"));
+}
+
+#[test]
+#[cfg(unix)]
+fn symlink_scan_policy_deduplicates_targets_and_does_not_recurse_forever() {
+    let dir = tempfile::tempdir().unwrap();
+    let external = tempfile::tempdir().unwrap();
+    write(external.path(), "Cargo.toml", "[package]");
+    std::os::unix::fs::symlink(external.path(), dir.path().join("linked")).unwrap();
+    let mut config = Config {
+        roots: vec![dir.path().to_string_lossy().into_owned()],
+        ..Config::default()
+    };
+    assert_eq!(scanner::scan_roots(&config).unwrap().projects_found, 0);
+    config.follow_symlinks = true;
+    assert_eq!(scanner::scan_roots(&config).unwrap().projects_found, 1);
+    config
+        .roots
+        .push(external.path().to_string_lossy().into_owned());
+    assert_eq!(scanner::scan_roots(&config).unwrap().projects_found, 1);
+    std::os::unix::fs::symlink(external.path(), external.path().join("loop")).unwrap();
+    assert!(scanner::scan_roots(&config).is_err());
+}
+
+#[test]
+fn git_snapshot_counts_remote_and_local_upstreams_from_the_same_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    let tree_id = repo.index().unwrap().write_tree().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let sig = git2::Signature::now("test", "test@example.invalid").unwrap();
+    let base = repo.commit(None, &sig, &sig, "base", &tree, &[]).unwrap();
+    let base_commit = repo.find_commit(base).unwrap();
+    repo.reference("refs/heads/main", base, true, "fixture")
+        .unwrap();
+    repo.set_head("refs/heads/main").unwrap();
+    repo.commit(Some("HEAD"), &sig, &sig, "local", &tree, &[&base_commit])
+        .unwrap();
+    repo.remote("origin", "https://example.invalid/team/project.git")
+        .unwrap();
+    repo.reference("refs/remotes/origin/main", base, true, "fixture")
+        .unwrap();
+    let mut branch = repo.find_branch("main", git2::BranchType::Local).unwrap();
+    branch.set_upstream(Some("origin/main")).unwrap();
+    let info = crate::git::get_git_info_fast(dir.path()).unwrap();
+    assert_eq!((info.ahead, info.behind), (Some(1), Some(0)));
+    let other = repo
+        .commit(None, &sig, &sig, "remote", &tree, &[&base_commit])
+        .unwrap();
+    repo.reference("refs/remotes/origin/main", other, true, "fixture")
+        .unwrap();
+    let info = crate::git::get_git_info_fast(dir.path()).unwrap();
+    assert_eq!((info.ahead, info.behind), (Some(1), Some(1)));
+    repo.branch("shared", &base_commit, false).unwrap();
+    branch.set_upstream(Some("shared")).unwrap();
+    let info = crate::git::get_git_info_fast(dir.path()).unwrap();
+    assert_eq!(info.upstream.as_deref(), Some("shared"));
+    assert_eq!((info.ahead, info.behind), (Some(1), Some(0)));
+}

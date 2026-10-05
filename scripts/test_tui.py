@@ -207,17 +207,23 @@ def main():
         ("menu navigate then cancel", [b"o", b"\x1b[F", b"\x1b", b"q"]),
         ("reload then quit", [b"rq"]),
         ("repeated reload then quit", [b"rrrq"]),
+        ("terminal child then quit", [b"o", b"x", b"q"]),
+        ("failed terminal child then quit", [b"o", b"x", b"q"]),
         ("Ctrl+C", [b"\x03"]),
     ]
     for name, keys in scenarios:
         with tempfile.TemporaryDirectory(prefix="ds-tui-test-") as root:
             Path(root, "Cargo.toml").write_text("[package]\nname='fixture'\nversion='0.1.0'\n", encoding="utf-8")
             env = {**os.environ, "DS_TEST_TUI_ROOT": root}
+            if "terminal child" in name:
+                env["DS_TEST_TUI_SCENARIO"] = "failure" if name.startswith("failed") else "success"
             command = [binary, "--ignored", "--exact", "tui::tests::real_terminal_child", "--nocapture", "--test-threads=1"]
             with session_factory(command, env) as session:
                 session.expect(b"quit")
                 for part in keys:
                     session.send(part)
+                    if "terminal child" in name and part == b"x":
+                        session.expect(b"DS_LAUNCH_CHILD")
                     if part != keys[-1]:
                         time.sleep(.1)
                         assert session.poll() is None, "mode transition unexpectedly exited"
@@ -234,7 +240,15 @@ def main():
                 assert b"\x1b[?1049h" in session.output
                 assert b"\x1b[?1049l" in session.output, "alternate screen not restored"
                 assert b"\x1b[?25h" in session.output, "cursor not restored"
-                assert not Path(root, "test-config.toml").exists(), "quit must not save config"
+                if name == "terminal child then quit":
+                    assert Path(root, "test-config.toml").exists(), "successful open must persist history"
+                else:
+                    assert not Path(root, "test-config.toml").exists(), "quit/failure must not save config"
+                if "terminal child" in name:
+                    launched = json.loads(Path(root, "launched.json").read_text())
+                    assert Path(launched["cwd"]).resolve() == Path(root).resolve()
+                    assert launched["marker"] == "injected value with spaces"
+                    assert bytes(session.output).count(b"\x1b[?1049h") >= 2, "TUI did not resume after child"
             print(f"PASS: {name}")
 
 

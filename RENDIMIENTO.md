@@ -1,5 +1,7 @@
 # Rendimiento de arranque y cierre de ds
 
+> Actualización 2026-10-05: las correcciones de los siete grupos pendientes están documentadas con mediciones por commit en [docs/performance/README.md](docs/performance/README.md). Este análisis conserva las observaciones de su revisión original; la recarga ya funciona en segundo plano, la salud se calcula fuera del hilo de entrada y el dibujo responde a cambios.
+
 Mediciones del 4 de octubre de 2026, Windows x86_64, ejecutable **release instalado**. Este análisis no cambia el código de la aplicación, la configuración, el diseño ni las dependencias.
 
 ## Resultado principal

@@ -35,8 +35,8 @@ pub struct Config {
     #[serde(default)]
     pub open: OpenConfig,
 
-    #[serde(default)]
-    pub project_status: std::collections::HashMap<String, String>,
+    #[serde(default, with = "status_map")]
+    pub project_status: std::collections::HashMap<String, ProjectStatus>,
 
     #[serde(default)]
     pub notes: std::collections::HashMap<String, String>,
@@ -269,8 +269,9 @@ pub fn load_config() -> Result<Config> {
 
     let mut config: Config = toml::from_str(&content)
         .with_context(|| format!("Failed to parse config at {}", path.display()))?;
-    config.persisted = Some(toml::from_str(&content)?);
+    config.validate()?;
     migrate_project_keys(&mut config)?;
+    config.persisted = Some(toml::Value::try_from(&config)?);
     Ok(config)
 }
 
@@ -307,9 +308,12 @@ pub(crate) fn commit_config_at(config: &Config, path: &Path) -> Result<Config> {
         }
         let lock = options.open(lock_path)?;
         lock.lock()?;
-        let current: toml::Value = toml::from_str(
+        let mut current_config: Config = toml::from_str(
             &std::fs::read_to_string(path).context("Config disappeared during editing")?,
         )?;
+        current_config.validate()?;
+        migrate_project_keys(&mut current_config)?;
+        let current = toml::Value::try_from(&current_config)?;
         merged = merge_value(config.persisted.as_ref(), Some(&merged), Some(&current), "")?
             .context("Config cannot be deleted")?;
         Some(lock)
@@ -317,6 +321,7 @@ pub(crate) fn commit_config_at(config: &Config, path: &Path) -> Result<Config> {
         None
     };
     let mut updated: Config = merged.clone().try_into()?;
+    updated.validate()?;
     updated.session_roots = config.session_roots.clone();
     write_config_at(&updated, path)?;
     updated.persisted = Some(merged);
@@ -386,24 +391,8 @@ pub(crate) fn project_key(path: &Path) -> String {
 }
 
 pub(crate) fn migrate_project_keys(config: &mut Config) -> Result<()> {
-    for map in [&mut config.notes, &mut config.project_status] {
-        let originals = map.clone();
-        let mut aliases: Vec<_> = originals.iter().collect();
-        aliases.sort_by_key(|(key, _)| *key);
-        for (old, value) in aliases {
-            if !Path::new(&old).exists() {
-                continue;
-            }
-            let key = project_key(Path::new(old));
-            if originals.contains_key(&key) {
-                continue;
-            }
-            if map.get(&key).is_some_and(|existing| existing != value) {
-                anyhow::bail!("Conflicting metadata aliases for {key}; original config preserved");
-            }
-            map.entry(key).or_insert(value.clone());
-        }
-    }
+    migrate_aliases(&mut config.notes)?;
+    migrate_aliases(&mut config.project_status)?;
     let originals = config.scores.clone();
     for (old, value) in &originals {
         if Path::new(&old).exists() {
@@ -421,6 +410,100 @@ pub(crate) fn migrate_project_keys(config: &mut Config) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn migrate_aliases<T: Clone + PartialEq>(
+    map: &mut std::collections::HashMap<String, T>,
+) -> Result<()> {
+    let originals = map.clone();
+    let mut aliases: Vec<_> = originals.iter().collect();
+    aliases.sort_by_key(|(key, _)| *key);
+    for (old, value) in aliases {
+        if !Path::new(&old).exists() {
+            continue;
+        }
+        let key = project_key(Path::new(old));
+        if originals.contains_key(&key) {
+            continue;
+        }
+        if map.get(&key).is_some_and(|existing| existing != value) {
+            anyhow::bail!("Conflicting metadata aliases for {key}; original config preserved");
+        }
+        map.entry(key).or_insert(value.clone());
+    }
+    Ok(())
+}
+
+mod status_map {
+    use super::ProjectStatus;
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::collections::HashMap;
+    pub fn serialize<S: Serializer>(
+        map: &HashMap<String, ProjectStatus>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(map.iter().map(|(path, status)| (path, status.as_str())))
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<HashMap<String, ProjectStatus>, D::Error> {
+        HashMap::<String, String>::deserialize(deserializer)?
+            .into_iter()
+            .map(|(path, value)| {
+                value
+                    .parse()
+                    .map(|status| (path, status))
+                    .map_err(serde::de::Error::custom)
+            })
+            .collect()
+    }
+}
+
+impl Config {
+    pub(crate) fn validate(&self) -> Result<()> {
+        let mut keys = std::collections::HashSet::new();
+        for action in &self.open.actions {
+            let mut chars = action.key.chars();
+            let key = chars
+                .next()
+                .filter(|key| !key.is_whitespace() && !key.is_control())
+                .context("Open action key must be one printable character")?;
+            anyhow::ensure!(
+                chars.next().is_none(),
+                "Open action key must be one character: {}",
+                action.key
+            );
+            anyhow::ensure!(
+                keys.insert(key.to_ascii_lowercase()),
+                "Duplicate open action key: {}",
+                action.key
+            );
+            anyhow::ensure!(
+                !action.name.trim().is_empty(),
+                "Open action name must not be empty"
+            );
+            if matches!(action.kind, None | Some(OpenActionKind::Command)) {
+                anyhow::ensure!(
+                    action
+                        .command
+                        .as_deref()
+                        .is_some_and(|command| !command.trim().is_empty()),
+                    "Missing command for open action {}",
+                    action.name
+                );
+            }
+        }
+        if let Some(default) = &self.open.default {
+            anyhow::ensure!(
+                self.open
+                    .actions
+                    .iter()
+                    .any(|action| &action.name == default),
+                "Unknown default open action: {default}"
+            );
+        }
+        Ok(())
+    }
 }
 
 fn write_config_at(config: &Config, path: &Path) -> Result<()> {
@@ -519,13 +602,11 @@ fn replace_config(source: &Path, destination: &Path) -> std::io::Result<()> {
 }
 
 pub fn get_project_status(config: &Config, path: &str) -> Option<ProjectStatus> {
-    config.project_status.get(path).and_then(|s| s.parse().ok())
+    config.project_status.get(path).cloned()
 }
 
 pub fn set_project_status(config: &mut Config, path: &str, status: ProjectStatus) {
-    config
-        .project_status
-        .insert(path.to_string(), status.as_str().to_string());
+    config.project_status.insert(path.to_string(), status);
 }
 
 pub fn get_note(config: &Config, path: &str) -> Option<String> {

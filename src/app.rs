@@ -621,7 +621,11 @@ impl App {
     pub fn poll_hydration_results(&mut self) -> bool {
         let mut changed = false;
 
-        while self.hydration_result_rx.is_some() {
+        // Keep a flood of Git results from monopolizing an input iteration.
+        for _ in 0..64 {
+            if self.hydration_result_rx.is_none() {
+                break;
+            }
             let recv_result = {
                 let rx = self.hydration_result_rx.as_ref().expect("checked is_some");
                 rx.try_recv()
@@ -639,8 +643,7 @@ impl App {
                             git.modified_count = result.modified_count;
                             git.untracked_count = result.untracked_count;
                         }
-                        project.warnings = result.health.warnings.clone();
-                        project.health = result.health;
+                        project.replace_health(result.health);
                     }
 
                     changed = true;

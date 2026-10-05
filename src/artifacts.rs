@@ -190,7 +190,15 @@ fn detect_rust_artifacts(snapshot: &DirSnapshot, artifacts: &mut Vec<ProjectArti
     }
     if let Some(package) = manifest.get("package") {
         if package.get("autobins").and_then(toml::Value::as_bool) != Some(false) {
-            if path.join("src/main.rs").is_file() {
+            let main_claimed = manifest
+                .get("bin")
+                .and_then(toml::Value::as_array)
+                .is_some_and(|bins| {
+                    bins.iter().any(|bin| {
+                        bin.get("path").and_then(toml::Value::as_str) == Some("src/main.rs")
+                    })
+                });
+            if path.join("src/main.rs").is_file() && !main_claimed {
                 if let Some(name) = package.get("name").and_then(toml::Value::as_str) {
                     names.insert(name.to_owned());
                 }
@@ -201,7 +209,13 @@ fn detect_rust_artifacts(snapshot: &DirSnapshot, artifacts: &mut Vec<ProjectArti
                     if path.extension().is_some_and(|ext| ext == "rs")
                         || path.join("main.rs").is_file()
                     {
-                        if let Some(name) = path.file_stem().and_then(|n| n.to_str()) {
+                        if let Some(name) = (if path.is_dir() {
+                            path.file_name()
+                        } else {
+                            path.file_stem()
+                        })
+                        .and_then(|n| n.to_str())
+                        {
                             names.insert(name.to_owned());
                         }
                     }

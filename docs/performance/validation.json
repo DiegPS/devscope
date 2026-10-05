@@ -1,0 +1,16 @@
+{
+  "rust_stable": "1.95.0",
+  "msrv": "1.89",
+  "unit_passed": 151,
+  "cli_passed": 3,
+  "pty_scenarios_passed": 11,
+  "coverage_lines": {
+    "count": 6788,
+    "covered": 5723,
+    "percent": 84.31054802592811
+  },
+  "coverage_gate": 75,
+  "dependencies_added": 0,
+  "cargo_lock_changed": false,
+  "release_build": "passed"
+}

@@ -412,13 +412,132 @@ mod tests {
         let root = std::env::var("DS_TEST_TUI_ROOT").expect("PTY fixture root required");
         let path = std::path::PathBuf::from(&root).join("test-config.toml");
         crate::config::with_test_config_path(path, || {
-            run_tui(Config {
-                roots: vec![root],
+            let mut config = Config {
+                roots: vec![root.clone()],
                 ..Config::default()
-            })
-            .unwrap();
+            };
+            if let Ok(scenario) = std::env::var("DS_TEST_TUI_SCENARIO") {
+                let mut action = child_action(std::path::Path::new(&root));
+                action.terminal_mode = true;
+                if scenario == "failure" {
+                    action.env.insert("DS_LAUNCH_FAIL".into(), "1".into());
+                }
+                config.open.actions = vec![action];
+            }
+            run_tui(config).unwrap();
         });
     }
+
+    fn child_action(root: &std::path::Path) -> crate::config::OpenActionConfig {
+        crate::config::OpenActionConfig {
+            key: "x".into(),
+            name: "test child".into(),
+            command: Some(
+                std::env::current_exe()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            args: [
+                "--ignored",
+                "--exact",
+                "tui::tests::launch_child",
+                "--nocapture",
+                "--test-threads=1",
+                "--skip",
+                "{name}",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+            current_dir: true,
+            terminal_mode: false,
+            kind: None,
+            env: std::collections::HashMap::from([
+                (
+                    "DS_LAUNCH_RECORD".into(),
+                    root.join("launched.json").to_string_lossy().into_owned(),
+                ),
+                (
+                    "DS_LAUNCH_MARKER".into(),
+                    "injected value with spaces".into(),
+                ),
+            ]),
+        }
+    }
+
+    #[test]
+    #[ignore = "test-only process launched by isolated launcher/PTY tests"]
+    fn launch_child() {
+        let record = std::env::var("DS_LAUNCH_RECORD").expect("owned output file");
+        let value = serde_json::json!({
+            "cwd": std::env::current_dir().unwrap(), "args": std::env::args().collect::<Vec<_>>(),
+            "marker": std::env::var("DS_LAUNCH_MARKER").unwrap(),
+        });
+        std::fs::write(record, serde_json::to_vec(&value).unwrap()).unwrap();
+        println!("DS_LAUNCH_CHILD");
+        assert!(
+            std::env::var_os("DS_LAUNCH_FAIL").is_none(),
+            "intentional child failure"
+        );
+    }
+
+    #[test]
+    fn launcher_passes_args_cwd_env_and_records_only_successful_spawn() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = App::new(Config::default());
+        app.config_save_path = Some(dir.path().join("config.toml"));
+        let pending = crate::app::PendingOpenAction {
+            action: child_action(dir.path()),
+            project_path: dir.path().to_path_buf(),
+            project_name: "project with spaces".into(),
+            artifacts: Vec::new(),
+        };
+        execute_open_action(&pending, &mut app);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let value: serde_json::Value = loop {
+            if let Some(value) = std::fs::read(dir.path().join("launched.json"))
+                .ok()
+                .and_then(|s| serde_json::from_slice(&s).ok())
+            {
+                break value;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "child failed to launch: {:?}",
+                app.status_message
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        };
+        assert_eq!(
+            dunce::canonicalize(value["cwd"].as_str().unwrap()).unwrap(),
+            dunce::canonicalize(dir.path()).unwrap()
+        );
+        assert!(value["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a == "project with spaces"));
+        assert_eq!(value["marker"], "injected value with spaces");
+        assert_eq!(
+            app.config.scores[&dir.path().to_string_lossy().into_owned()].opens,
+            1
+        );
+        let mut missing = pending;
+        missing.action.command = Some(
+            dir.path()
+                .join("missing-executable")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        execute_open_action(&missing, &mut app);
+        assert_eq!(app.message_level, crate::app::MessageLevel::Error);
+        assert_eq!(
+            app.config.scores[&dir.path().to_string_lossy().into_owned()].opens,
+            1
+        );
+    }
+
     #[cfg(target_os = "windows")]
     use std::fs;
     #[cfg(target_os = "windows")]
