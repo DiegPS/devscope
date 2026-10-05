@@ -43,8 +43,6 @@ pub(crate) fn detect_commands_with_snapshot(
     detect_dotnet_commands(snapshot, &mut commands);
     detect_java_commands(snapshot, &mut commands);
 
-    // Limit to 6 commands
-    commands.truncate(6);
     commands
 }
 
@@ -100,12 +98,19 @@ fn detect_node_pm(snapshot: &DirSnapshot) -> String {
 fn parse_package_json_scripts(snapshot: &DirSnapshot, pm: &str) -> Option<Vec<(String, String)>> {
     let content = snapshot.read_to_string("package.json")?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    let scripts_obj = json.get("scripts")?.as_object()?;
+    json.as_object()?;
+    let Some(scripts) = json.get("scripts") else {
+        return Some(Vec::new());
+    };
+    let scripts_obj = scripts.as_object()?;
 
     let mut result = Vec::new();
 
     for key in ["dev", "start", "build", "test"] {
-        if let Some(_val) = scripts_obj.get(key) {
+        if scripts_obj
+            .get(key)
+            .is_some_and(serde_json::Value::is_string)
+        {
             let cmd = match pm {
                 "pnpm" => format!("pnpm {}", key),
                 "yarn" => format!("yarn {}", key),
@@ -122,11 +127,7 @@ fn parse_package_json_scripts(snapshot: &DirSnapshot, pm: &str) -> Option<Vec<(S
         }
     }
 
-    if result.is_empty() {
-        None
-    } else {
-        Some(result)
-    }
+    Some(result)
 }
 
 fn pm_install_cmd(pm: &str) -> String {
@@ -529,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn limits_to_six_commands() {
+    fn mixed_stack_keeps_later_go_commands() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(
             dir.path().join("package.json"),
@@ -539,6 +540,6 @@ mod tests {
         fs::write(dir.path().join("Cargo.toml"), "[package]\nname=\"t\"").unwrap();
         fs::write(dir.path().join("go.mod"), "module t").unwrap();
         let cmds = detect_commands(dir.path(), &[]);
-        assert!(cmds.len() <= 6);
+        assert!(cmds.iter().any(|c| c.command == "go test ./..."));
     }
 }

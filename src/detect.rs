@@ -40,47 +40,40 @@ pub(crate) fn detect_stack_with_snapshot(snapshot: &DirSnapshot) -> Vec<String> 
     if snapshot.has("package.json") {
         stack.push("Node".to_string());
 
-        if let Some(content) = snapshot.read_to_string("package.json") {
-            let lower = content.to_lowercase();
-
-            if lower.contains("\"react\"") || lower.contains("\"react-dom\"") {
-                stack.push("React".to_string());
-            }
-            if lower.contains("\"vue\"") || lower.contains("\"@vue/") {
-                stack.push("Vue".to_string());
-            }
-            if lower.contains("\"svelte\"") || lower.contains("\"@sveltejs/") {
-                stack.push("Svelte".to_string());
-            }
-            if lower.contains("\"next\"") || lower.contains("\"next/") {
-                stack.push("Next.js".to_string());
-            }
-            if lower.contains("\"vite\"") || lower.contains("\"@vitejs/") {
-                stack.push("Vite".to_string());
-            }
-            if lower.contains("\"tailwindcss\"") {
-                stack.push("Tailwind".to_string());
-            }
-            if lower.contains("\"electron\"") {
-                stack.push("Electron".to_string());
-            }
-            if lower.contains("\"tauri\"") || lower.contains("\"@tauri-apps/") {
-                stack.push("Tauri".to_string());
-            }
-            if lower.contains("\"express\"") {
-                stack.push("Express".to_string());
-            }
-            if lower.contains("\"fastify\"") {
-                stack.push("Fastify".to_string());
-            }
-            if lower.contains("\"nuxt\"") {
-                stack.push("Nuxt".to_string());
-            }
-            if lower.contains("\"angular\"") || lower.contains("\"@angular/") {
-                stack.push("Angular".to_string());
-            }
-            if lower.contains("\"typescript\"") {
-                stack.push("TypeScript".to_string());
+        if let Some(json) = snapshot
+            .read_to_string("package.json")
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        {
+            let names: Vec<_> = [
+                "dependencies",
+                "devDependencies",
+                "peerDependencies",
+                "optionalDependencies",
+            ]
+            .iter()
+            .filter_map(|key| json.get(key).and_then(serde_json::Value::as_object))
+            .flat_map(|deps| deps.keys().map(String::as_str))
+            .collect();
+            for (label, exact, prefix) in [
+                ("React", &["react", "react-dom"][..], ""),
+                ("Vue", &["vue"][..], "@vue/"),
+                ("Svelte", &["svelte"][..], "@sveltejs/"),
+                ("Next.js", &["next"][..], ""),
+                ("Vite", &["vite"][..], "@vitejs/"),
+                ("Tailwind", &["tailwindcss"][..], ""),
+                ("Electron", &["electron"][..], ""),
+                ("Tauri", &["tauri"][..], "@tauri-apps/"),
+                ("Express", &["express"][..], ""),
+                ("Fastify", &["fastify"][..], ""),
+                ("Nuxt", &["nuxt"][..], ""),
+                ("Angular", &["angular"][..], "@angular/"),
+                ("TypeScript", &["typescript"][..], ""),
+            ] {
+                if names.iter().any(|name| {
+                    exact.contains(name) || (!prefix.is_empty() && name.starts_with(prefix))
+                }) {
+                    stack.push(label.into());
+                }
             }
         }
     }
@@ -98,28 +91,24 @@ pub(crate) fn detect_stack_with_snapshot(snapshot: &DirSnapshot) -> Vec<String> 
     if snapshot.has("Cargo.toml") {
         stack.push("Rust".to_string());
 
-        if let Some(content) = snapshot.read_to_string("Cargo.toml") {
-            let lower = content.to_lowercase();
-            if lower.contains("ratatui") {
-                stack.push("Ratatui".to_string());
-            }
-            if lower.contains("tauri") {
-                stack.push("Tauri".to_string());
-            }
-            if lower.contains("axum") {
-                stack.push("Axum".to_string());
-            }
-            if lower.contains("actix-web") || lower.contains("actix_web") {
-                stack.push("Actix".to_string());
-            }
-            if lower.contains("bevy") {
-                stack.push("Bevy".to_string());
-            }
-            if lower.contains("tokio") {
-                stack.push("Tokio".to_string());
-            }
-            if lower.contains("serde") {
-                stack.push("Serde".to_string());
+        if let Some(manifest) = snapshot
+            .read_to_string("Cargo.toml")
+            .and_then(|s| s.parse::<toml::Value>().ok())
+        {
+            let mut names = std::collections::HashSet::new();
+            collect_dependencies(&manifest, &mut names);
+            for (name, label) in [
+                ("ratatui", "Ratatui"),
+                ("tauri", "Tauri"),
+                ("axum", "Axum"),
+                ("actix-web", "Actix"),
+                ("bevy", "Bevy"),
+                ("tokio", "Tokio"),
+                ("serde", "Serde"),
+            ] {
+                if names.contains(name) {
+                    stack.push(label.into());
+                }
             }
         }
     }
@@ -137,39 +126,37 @@ pub(crate) fn detect_stack_with_snapshot(snapshot: &DirSnapshot) -> Vec<String> 
     {
         stack.push("Python".to_string());
 
-        let check_file = |filename: &str| -> Option<String> {
-            if let Some(content) = snapshot.read_to_string(filename) {
-                let lower = content.to_lowercase();
-                if lower.contains("fastapi") {
-                    return Some("FastAPI".to_string());
-                }
-                if lower.contains("django") {
-                    return Some("Django".to_string());
-                }
-                if lower.contains("flask") {
-                    return Some("Flask".to_string());
-                }
-                if lower.contains("torch") || lower.contains("pytorch") {
-                    return Some("PyTorch".to_string());
-                }
-                if lower.contains("tensorflow") {
-                    return Some("TensorFlow".to_string());
-                }
-                if lower.contains("numpy") {
-                    return Some("NumPy".to_string());
-                }
-                if lower.contains("pandas") {
-                    return Some("Pandas".to_string());
+        let mut names = std::collections::HashSet::new();
+        for filename in ["pyproject.toml", "Pipfile"] {
+            if let Some(manifest) = snapshot
+                .read_to_string(filename)
+                .and_then(|s| s.parse::<toml::Value>().ok())
+            {
+                collect_dependencies(&manifest, &mut names);
+            }
+        }
+        if let Some(requirements) = snapshot.read_to_string("requirements.txt") {
+            for line in requirements
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.starts_with(['#', '-']))
+            {
+                if let Some(name) = dependency_name(line) {
+                    names.insert(name);
                 }
             }
-            None
-        };
-
-        for f in &["pyproject.toml", "requirements.txt", "Pipfile"] {
-            if let Some(framework) = check_file(f) {
-                if !stack.contains(&framework) {
-                    stack.push(framework);
-                }
+        }
+        for (name, label) in [
+            ("fastapi", "FastAPI"),
+            ("django", "Django"),
+            ("flask", "Flask"),
+            ("torch", "PyTorch"),
+            ("tensorflow", "TensorFlow"),
+            ("numpy", "NumPy"),
+            ("pandas", "Pandas"),
+        ] {
+            if names.contains(name) {
+                stack.push(label.into());
             }
         }
     }
@@ -337,7 +324,10 @@ pub(crate) fn detect_scripts_with_snapshot(snapshot: &DirSnapshot) -> Vec<String
     if let Some(content) = snapshot.read_to_string("package.json") {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
             if let Some(obj) = json.get("scripts").and_then(|s| s.as_object()) {
-                for key in obj.keys() {
+                for (key, value) in obj {
+                    if !value.is_string() {
+                        continue;
+                    }
                     scripts.push(key.clone());
                 }
             }
@@ -345,4 +335,79 @@ pub(crate) fn detect_scripts_with_snapshot(snapshot: &DirSnapshot) -> Vec<String
     }
 
     scripts
+}
+
+fn dependency_name(text: &str) -> Option<String> {
+    let name: String = text
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || ['-', '_', '.'].contains(c))
+        .collect();
+    (!name.is_empty()).then(|| name.to_ascii_lowercase().replace('_', "-"))
+}
+
+fn collect_dependencies(value: &toml::Value, names: &mut std::collections::HashSet<String>) {
+    if let Some(table) = value.as_table() {
+        for (key, value) in table {
+            if [
+                "dependencies",
+                "dev-dependencies",
+                "build-dependencies",
+                "packages",
+                "dev-packages",
+            ]
+            .contains(&key.as_str())
+            {
+                match value {
+                    toml::Value::Table(deps) => {
+                        for (name, detail) in deps {
+                            let name = detail
+                                .get("package")
+                                .and_then(toml::Value::as_str)
+                                .unwrap_or(name);
+                            if let Some(name) = dependency_name(name) {
+                                names.insert(name);
+                            }
+                        }
+                    }
+                    toml::Value::Array(deps) => {
+                        for dep in deps.iter().filter_map(toml::Value::as_str) {
+                            if let Some(name) = dependency_name(dep) {
+                                names.insert(name);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            } else if [
+                "workspace",
+                "target",
+                "project",
+                "tool",
+                "poetry",
+                "group",
+                "optional-dependencies",
+                "dependency-groups",
+            ]
+            .contains(&key.as_str())
+                || value
+                    .as_table()
+                    .is_some_and(|table| table.contains_key("dependencies"))
+                || key.starts_with("cfg(")
+            {
+                collect_dependencies(value, names);
+                if ["optional-dependencies", "dependency-groups"].contains(&key.as_str()) {
+                    if let Some(groups) = value.as_table() {
+                        for deps in groups.values().filter_map(toml::Value::as_array) {
+                            for dep in deps.iter().filter_map(toml::Value::as_str) {
+                                if let Some(name) = dependency_name(dep) {
+                                    names.insert(name);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

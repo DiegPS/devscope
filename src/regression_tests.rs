@@ -1460,3 +1460,45 @@ fn cargo_artifacts_use_bin_names_workspace_target_and_library_has_no_guessed_exe
         crate::artifacts::detect_artifacts(&dir.path().join("member"), &["Rust".into()]);
     assert!(artifacts.iter().all(|a| a.kind != ArtifactKind::Executable));
 }
+
+#[test]
+fn commands_keep_all_stacks_and_node_install_without_scripts() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "package.json", "{}");
+    assert_eq!(
+        crate::commands::detect_commands(dir.path(), &[])[0].command,
+        "npm install"
+    );
+    write(dir.path(), "Cargo.toml", "[package]\nname='rust'");
+    write(dir.path(), "go.mod", "module test");
+    write(dir.path(), "docker-compose.yml", "services: {}");
+    let commands = crate::commands::detect_commands(dir.path(), &[]);
+    assert!(commands.len() > 6);
+    assert!(commands.iter().any(|c| c.command == "docker compose down"));
+}
+
+#[test]
+fn framework_detection_uses_dependencies_not_descriptions_comments_or_script_names() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "package.json",
+        r#"{"name":"react","description":"vue next vite","scripts":{"express":"echo tauri"},"dependencies":{"@angular/core":"1"}}"#,
+    );
+    write(dir.path(), "Cargo.toml", "# tokio ratatui axum\n[package]\nname='bevy'\n[dependencies]\nrenamed={package='serde',version='1'}");
+    write(
+        dir.path(),
+        "requirements.txt",
+        "# django flask\nnot-numpy==1\nfastapi>=1",
+    );
+    let stack = crate::detect::detect_stack(dir.path());
+    for expected in ["Angular", "Serde", "FastAPI"] {
+        assert!(stack.iter().any(|s| s == expected), "{expected}: {stack:?}");
+    }
+    for absent in [
+        "React", "Vue", "Next.js", "Vite", "Express", "Tauri", "Tokio", "Ratatui", "Axum", "Bevy",
+        "Django", "Flask", "NumPy",
+    ] {
+        assert!(!stack.iter().any(|s| s == absent), "{absent}: {stack:?}");
+    }
+}

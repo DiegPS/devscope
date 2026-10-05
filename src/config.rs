@@ -658,7 +658,7 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
         kind: None,
     });
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     actions.push(OpenActionConfig {
         key: "t".to_string(),
         name: "terminal".to_string(),
@@ -669,6 +669,18 @@ fn default_open_actions() -> Vec<OpenActionConfig> {
             "{path}".to_string(),
         ],
         current_dir: false,
+        terminal_mode: false,
+        env: std::collections::HashMap::new(),
+        kind: None,
+    });
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    actions.push(OpenActionConfig {
+        key: "t".into(),
+        name: "terminal".into(),
+        command: Some("x-terminal-emulator".into()),
+        args: Vec::new(),
+        current_dir: true,
         terminal_mode: false,
         env: std::collections::HashMap::new(),
         kind: None,
