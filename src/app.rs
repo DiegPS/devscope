@@ -361,7 +361,12 @@ impl App {
                     MessageLevel::Info,
                 );
             }
-            Err(error) => self.set_message(format!("Scan failed: {error:#}"), MessageLevel::Error),
+            Err(error) => {
+                // The previous list remains visible: resume its cancelled jobs
+                // so a failed reload cannot leave Git permanently Checking.
+                self.start_background_jobs();
+                self.set_message(format!("Scan failed: {error:#}"), MessageLevel::Error);
+            }
         }
         true
     }

@@ -23,7 +23,7 @@ En PowerShell, comprobar `$LASTEXITCODE` antes de continuar al comando siguiente
 - UI: todos los modos, listas vacías/con datos, vistas compacta/detallada, tamaños desde 1 × 1 hasta 160 × 45, contenido Unicode largo, estados Git y detalles completos. Las assertions de contenido verifican elementos importantes sin fijar el diseño por píxel.
 - CLI: parsing de comandos, argumentos inválidos, resolución exacta/parcial/ambigua, mutations sobre config temporal y scan/list. Los tests de integración invocan el ejecutable real para ayuda/version/errores, verificando códigos de salida, stdout y stderr.
 
-En Windows, la tanda actual tiene **154 pruebas normales** (151 unitarias/de contratos y 3 de CLI), más **11 escenarios PTY**. Los conteos varían por plataforma. Se añadieron contratos para escrituras simultáneas con barrera de 12 hilos, migración de historial sin duplicar counters, profundidad exacta, opciones del scanner, monorepos, actividad de archivos existentes, artefactos Cargo, parsers de dependencias, recarga asíncrona y lanzamiento real con argumentos, cwd y env. El MSRV declarado es Rust 1.89 y CI lo comprueba por separado.
+En Windows, la tanda actual tiene **155 pruebas normales** (152 unitarias/de contratos y 3 de CLI), más **11 escenarios PTY**. Los conteos varían por plataforma. Se añadieron contratos para escrituras simultáneas con barrera de 12 hilos, migración de historial sin duplicar counters, profundidad exacta, opciones del scanner, monorepos, actividad de archivos existentes, artefactos Cargo, parsers de dependencias, recarga asíncrona y lanzamiento real con argumentos, cwd y env. El MSRV declarado es Rust 1.89 y CI lo comprueba por separado.
 
 ## Terminal real y aislamiento
 

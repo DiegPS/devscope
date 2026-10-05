@@ -23,7 +23,7 @@ Medianas y p95 en ms. La última columna compara el escaneo con el punto inmedia
 | point-6 | 282.93 | 296.74 | 441.74 | -4.2% |
 | point-7 | 282.41 | 292.15 | 450.21 | -0.2% |
 
-La mediana final del escaneo es aproximadamente **5% mayor que la base** y la de Git completo aproximadamente **4% mayor**. Las comprobaciones de fuentes y las reglas de recorrido hacen trabajo que antes faltaba. No se presenta esta serie como una mejora de velocidad del scanner. El primer intento secuencial del punto 2 dio 976 ms; se descartó antes del commit y se corrigió con recorrido paralelo y sin canonicalización redundante de cada proyecto.
+La mediana del punto 7 del escaneo es aproximadamente **5% mayor que la base** y la de Git completo aproximadamente **4% mayor**. Las comprobaciones de fuentes y las reglas de recorrido hacen trabajo que antes faltaba. No se presenta esta serie como una mejora de velocidad del scanner. El primer intento secuencial del punto 2 dio 976 ms; se descartó antes del commit y se corrigió con recorrido paralelo y sin canonicalización redundante de cada proyecto.
 
 ## Cambios, pruebas y commits
 
@@ -49,10 +49,10 @@ La misma fixture release, ConPTY real, dos calentamientos y diez muestras. Inclu
 ## Verificación final
 
 - Format y clippy all-targets sin warnings.
-- 151 pruebas unitarias/de contratos y tres CLI: **154 normales** en Windows. Los tres helpers ignored se ejecutan explícitamente en scripts/tests cuando corresponden.
+- 152 pruebas unitarias/de contratos y tres CLI: **155 normales** en Windows. Los tres helpers ignored se ejecutan explícitamente en scripts/tests cuando corresponden.
 - **11 escenarios PTY**, incluidos lanzar un proceso real, su fallo, recargar y salir.
 - Rust 1.89: las mismas pruebas pasan; CI añade Linux en ese MSRV, además de stable Windows/Linux/macOS.
-- Cobertura LLVM de unit/CLI/PTY: **84,31% (5.723/6.788 líneas)**; gate obligatorio 75%. El porcentaje incluye tests inline y excluye regression_tests.rs y tests/, como explica TESTING.md.
+- Cobertura LLVM de unit/CLI/PTY: **85,16% (5.791/6.800 líneas)**; gate obligatorio 75%. El porcentaje incluye tests inline y excluye regression_tests.rs y tests/, como explica TESTING.md.
 - Build release verificada. Los tests no escriben configuración personal ni abren editores externos.
 
 ## Repetir las mediciones
@@ -79,3 +79,9 @@ Respecto al ejecutable original, **abrir es aproximadamente 24 ms mas lento** en
 ## Correccion encontrada por CI de macOS
 
 La prueba de env versionado detecto una diferencia entre /var y /private/var en temporales de macOS. Se canonicaliza el directorio de trabajo antes de calcular el path del indice, manteniendo intacto el nombre del archivo env. Se conserva el test y se agrega un contrato Unix con un alias symlink a un repositorio. ci-macos-env-path.json guarda la comparacion de velocidad de esta reparacion adicional. La rama de env no se ejecuta en la fixture de velocidad; las diferencias pequenas entre tandas no se atribuyen a ese ajuste.
+
+## Cierre y consumo de CI
+
+La serie genero dos ejecuciones de GitHub Actions: d169c0b encontro el fallo macOS; cadc2dd paso los cinco jobs (Windows, Linux, macOS, MSRV y cobertura): https://github.com/DiegPS/devscope/actions/runs/37274319842.
+
+El ultimo ajuste reanuda la hidratacion Git de la lista anterior cuando falla una recarga, evitando un estado Checking permanente. Su prueba, clippy, suite normal, Rust 1.89, cobertura y release se verificaron localmente; la comparacion adicional esta en reload-error-recovery.json. Las ultimas tandas aisladas fluctuaron entre 282 y 317 ms de escaneo: no se atribuye esa diferencia a cambios en una rama de error que el benchmark no ejecuta. El commit final se sube con [skip ci] para conservar minutos, a peticion del usuario. No se presenta ese ultimo commit como una tercera validacion remota.

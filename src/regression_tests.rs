@@ -1774,3 +1774,41 @@ fn tracked_env_warning_survives_a_symlink_to_the_worktree_directory() {
         .warnings
         .contains(&crate::project::ProjectWarning::EnvFileLocal));
 }
+
+#[test]
+fn failed_background_reload_preserves_list_and_resumes_git_checks() {
+    let (_dir, mut app) = fixture();
+    let path = app.projects[0].path.clone();
+    let _repo = git2::Repository::init(&path).unwrap();
+    app.projects[0].git = Some(crate::git::get_git_info_fast(&path).unwrap());
+    app.start_background_jobs();
+    app.config
+        .notes
+        .insert(path.join(".").to_string_lossy().into_owned(), "one".into());
+    app.config.notes.insert(
+        path.join("../alpha").to_string_lossy().into_owned(),
+        "conflict".into(),
+    );
+    app.start_reload();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        app.poll_reload();
+        app.poll_hydration_results();
+        if app.message_level == crate::app::MessageLevel::Error
+            && app.projects[0].git.as_ref().unwrap().dirty_status == DirtyStatus::Dirty
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "reload failed to recover: {:?}",
+            app.status_message
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(app.projects.len(), 3);
+    assert!(app.status_message.as_ref().unwrap().contains("Scan failed"));
+    assert!(app.projects[0]
+        .warnings
+        .contains(&crate::project::ProjectWarning::DirtyWorkingTree));
+}
