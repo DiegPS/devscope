@@ -93,6 +93,13 @@ pub struct ScanResult {
 
 /// Scan all configured roots and return detected projects.
 pub fn scan_roots(config: &Config) -> Result<ScanResult> {
+    scan_roots_cancellable(config, &std::sync::atomic::AtomicBool::new(false))
+}
+
+pub(crate) fn scan_roots_cancellable(
+    config: &Config,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<ScanResult> {
     let start = Instant::now();
     let mut normalized = config.clone();
     crate::config::migrate_project_keys(&mut normalized)?;
@@ -116,7 +123,7 @@ pub fn scan_roots(config: &Config) -> Result<ScanResult> {
 
     let root_projects: Vec<Result<Vec<Project>>> = roots
         .par_iter()
-        .map(|root| scan_single_root(root, config))
+        .map(|root| scan_single_root(root, config, cancelled))
         .collect();
 
     let mut all_projects = Vec::new();
@@ -139,6 +146,9 @@ pub fn scan_roots(config: &Config) -> Result<ScanResult> {
         }
     }
 
+    if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+        anyhow::bail!("Scan cancelled");
+    }
     let duration_ms = start.elapsed().as_millis();
     let count = all_projects.len();
 
@@ -183,17 +193,38 @@ pub fn recompute_project_health(project: &mut Project) {
     project.health = health;
 }
 
-fn scan_single_root(root: &Path, config: &Config) -> Result<Vec<Project>> {
-    let paths = collect_project_paths(root, config)?;
+fn scan_single_root(
+    root: &Path,
+    config: &Config,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<Project>> {
+    let paths = collect_paths_cancellable(root, config, cancelled)?;
     Ok(paths
         .par_iter()
-        .filter_map(|path| analyze_project(path, config))
+        .filter_map(|path| {
+            if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                None
+            } else {
+                analyze_project(path, config)
+            }
+        })
         .collect())
 }
 
 /// One traversal policy for discovery and analysis. Root depth is zero;
 /// project markers do not prune workspace members underneath a project.
 pub(crate) fn collect_project_paths(root: &Path, config: &Config) -> Result<Vec<PathBuf>> {
+    collect_paths_cancellable(root, config, &std::sync::atomic::AtomicBool::new(false))
+}
+
+fn collect_paths_cancellable(
+    root: &Path,
+    config: &Config,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<PathBuf>> {
+    if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+        anyhow::bail!("Scan cancelled");
+    }
     let mut builder = WalkBuilder::new(root);
     builder
         .max_depth(Some(config.max_depth))
@@ -214,6 +245,9 @@ pub(crate) fn collect_project_paths(root: &Path, config: &Config) -> Result<Vec<
     builder.threads(std::thread::available_parallelism().map_or(2, |n| n.get().min(8)));
     builder.build_parallel().run(|| {
         Box::new(|entry| {
+            if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                return ignore::WalkState::Quit;
+            }
             match entry {
                 Ok(entry)
                     if entry.file_type().is_some_and(|ft| ft.is_dir())
@@ -358,7 +392,7 @@ fn analyze_project(path: &Path, config: &Config) -> Option<Project> {
     })
 }
 
-fn hydrate_project_git_status(project: &mut Project) {
+pub(crate) fn hydrate_project_git_status(project: &mut Project) {
     if project.git.is_none() {
         return;
     }

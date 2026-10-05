@@ -205,6 +205,8 @@ def main():
         ("help scroll then close", [b"?", b"\x1b[F", b"\x1b", b"q"]),
         ("details focus scroll then return", [b"\t", b"\x1b[F", b"\t", b"q"]),
         ("menu navigate then cancel", [b"o", b"\x1b[F", b"\x1b", b"q"]),
+        ("reload then quit", [b"rq"]),
+        ("repeated reload then quit", [b"rrrq"]),
         ("Ctrl+C", [b"\x03"]),
     ]
     for name, keys in scenarios:

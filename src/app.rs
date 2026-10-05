@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, TryRecvError};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::Instant;
 
 use crate::config::{Config, OpenActionConfig};
@@ -149,6 +153,7 @@ struct HydrationResult {
     modified_count: Option<usize>,
     untracked_count: Option<usize>,
     generation: u64,
+    health: crate::project::ProjectHealth,
 }
 
 pub struct App {
@@ -178,6 +183,9 @@ pub struct App {
     pub view_mode: ViewMode,
     pub pending_action: Option<PendingOpenAction>,
     pub ports_rx: Option<mpsc::Receiver<HashMap<String, Vec<u16>>>>,
+    background_cancel: Arc<AtomicBool>,
+    reload_cancel: Arc<AtomicBool>,
+    reload_rx: Option<mpsc::Receiver<anyhow::Result<scanner::ScanResult>>>,
     hydration_generation: u64,
     hydration_result_rx: Option<mpsc::Receiver<HydrationResult>>,
     #[cfg(test)]
@@ -228,6 +236,9 @@ impl App {
             view_mode,
             pending_action: None,
             ports_rx: None,
+            background_cancel: Arc::new(AtomicBool::new(false)),
+            reload_cancel: Arc::new(AtomicBool::new(false)),
+            reload_rx: None,
             hydration_generation: 0,
             hydration_result_rx: None,
             #[cfg(test)]
@@ -275,9 +286,84 @@ impl App {
         self.apply_filter_and_sort();
         self.selected = 0;
         self.needs_reload = false;
+    }
 
-        self.spawn_port_detection();
+    pub(crate) fn start_background_jobs(&mut self) {
         self.start_background_hydration();
+        self.spawn_port_detection();
+    }
+
+    /// At most one scan runs; repeated requests coalesce into one next scan.
+    pub fn start_reload(&mut self) {
+        if self.reload_rx.is_some() {
+            return;
+        }
+        self.needs_reload = false;
+        self.background_cancel.store(true, Ordering::Relaxed);
+        self.hydration_result_rx = None;
+        self.ports_rx = None;
+        let config = self.config.clone();
+        let cancelled = Arc::clone(&self.reload_cancel);
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(scanner::scan_roots_cancellable(&config, &cancelled));
+        });
+        self.reload_rx = Some(rx);
+        self.set_message("Scanning…".into(), MessageLevel::Info);
+    }
+
+    pub fn poll_reload(&mut self) -> bool {
+        let Some(rx) = &self.reload_rx else {
+            return false;
+        };
+        let result = match rx.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Disconnected) => Err(anyhow::anyhow!("Scan worker disconnected")),
+        };
+        self.reload_rx = None;
+        if self.needs_reload {
+            self.start_reload();
+            return true;
+        }
+        match result {
+            Ok(mut result) => {
+                // Notes and statuses may have been edited while scanning.
+                for project in &mut result.projects {
+                    project.note = self.config.notes.get(&project.id).cloned();
+                    if let Some(status) =
+                        crate::config::get_project_status(&self.config, &project.id)
+                    {
+                        project.status = status;
+                    }
+                }
+                let selected_id = self.selected_project().map(|p| p.id.clone());
+                self.projects = result.projects;
+                self.total_projects = result.projects_found;
+                self.scan_duration_ms = result.duration_ms;
+                self.apply_filter_and_sort();
+                if let Some(id) = selected_id {
+                    if let Some(index) = self
+                        .filtered_indices
+                        .iter()
+                        .position(|&i| self.projects[i].id == id)
+                    {
+                        self.selected = index;
+                    }
+                }
+                self.start_background_hydration();
+                self.spawn_port_detection();
+                self.set_message(
+                    format!(
+                        "Scanned {} projects in {}ms",
+                        self.total_projects, self.scan_duration_ms
+                    ),
+                    MessageLevel::Info,
+                );
+            }
+            Err(error) => self.set_message(format!("Scan failed: {error:#}"), MessageLevel::Error),
+        }
+        true
     }
 
     fn spawn_port_detection(&mut self) {
@@ -291,7 +377,11 @@ impl App {
             return;
         }
         let (tx, rx) = mpsc::channel();
+        let cancelled = Arc::clone(&self.background_cancel);
         std::thread::spawn(move || {
+            if cancelled.load(Ordering::Relaxed) {
+                return;
+            }
             let map = crate::ports::detect_project_ports(&paths);
             let _ = tx.send(map);
         });
@@ -480,51 +570,51 @@ impl App {
     }
 
     fn start_background_hydration(&mut self) {
+        self.background_cancel.store(true, Ordering::Relaxed);
+        self.background_cancel = Arc::new(AtomicBool::new(false));
         self.hydration_generation = self.hydration_generation.wrapping_add(1);
         self.hydration_result_rx = None;
-
         let gen = self.hydration_generation;
-
-        // Collect paths for all git repos; apply cache hits immediately
-        let mut jobs: Vec<(usize, PathBuf)> = Vec::new();
-
-        // Collect indices+paths first to avoid borrow conflicts
-        let work: Vec<(usize, PathBuf)> = self
+        let jobs: Vec<_> = self
             .projects
-            .iter()
+            .iter_mut()
             .enumerate()
             .filter(|(_, p)| p.git.is_some())
-            .map(|(i, p)| (i, p.path.clone()))
+            .map(|(index, project)| {
+                if let Some(git) = &mut project.git {
+                    git.dirty_status = DirtyStatus::Checking;
+                }
+                (index, project.clone())
+            })
             .collect();
-
-        for (i, path) in work {
-            if let Some(ref mut git) = self.projects[i].git {
-                git.dirty_status = DirtyStatus::Checking;
-            }
-            jobs.push((i, path));
-        }
-
         if jobs.is_empty() {
             return;
         }
-
-        let (result_tx, result_rx) = mpsc::channel::<HydrationResult>();
-
+        let cancelled = Arc::clone(&self.background_cancel);
+        let (result_tx, result_rx) = mpsc::sync_channel::<HydrationResult>(32);
         std::thread::spawn(move || {
             use rayon::prelude::*;
-            jobs.par_iter().for_each(|(project_index, path)| {
-                let (status, modified, untracked) =
-                    crate::git::get_git_status(path).unwrap_or((DirtyStatus::Error, None, None));
-                let _ = result_tx.send(HydrationResult {
-                    project_index: *project_index,
-                    dirty_status: status,
-                    modified_count: modified,
-                    untracked_count: untracked,
-                    generation: gen,
+            jobs.into_par_iter()
+                .for_each(|(project_index, mut project)| {
+                    if cancelled.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    scanner::hydrate_project_git_status(&mut project);
+                    if cancelled.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    if let Some(git) = project.git {
+                        let _ = result_tx.send(HydrationResult {
+                            project_index,
+                            dirty_status: git.dirty_status,
+                            modified_count: git.modified_count,
+                            untracked_count: git.untracked_count,
+                            health: project.health,
+                            generation: gen,
+                        });
+                    }
                 });
-            });
         });
-
         self.hydration_result_rx = Some(result_rx);
     }
 
@@ -549,7 +639,8 @@ impl App {
                             git.modified_count = result.modified_count;
                             git.untracked_count = result.untracked_count;
                         }
-                        scanner::recompute_project_health(project);
+                        project.warnings = result.health.warnings.clone();
+                        project.health = result.health;
                     }
 
                     changed = true;
@@ -597,4 +688,11 @@ impl App {
 
 fn stack_contains(stack: &[String], needle: &str) -> bool {
     stack.iter().any(|entry| entry == needle)
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        self.background_cancel.store(true, Ordering::Relaxed);
+        self.reload_cancel.store(true, Ordering::Relaxed);
+    }
 }

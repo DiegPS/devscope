@@ -353,7 +353,7 @@ fn menu_navigation_can_reach_and_confirm_the_last_action_in_small_windows() {
         app.pending_action.as_ref().unwrap().action.name,
         action.name
     );
-    assert!(!app.config_save_path.unwrap().exists());
+    assert!(!app.config_save_path.as_ref().unwrap().exists());
 }
 
 #[test]
@@ -404,7 +404,7 @@ fn visual_preferences_apply_without_changing_project_data_or_saved_config() {
     assert!(screen.contains("warn"));
     assert!(!screen.contains("✓"));
     assert_eq!(projects, serde_json::to_string(&app.projects).unwrap());
-    assert!(!app.config_save_path.unwrap().exists());
+    assert!(!app.config_save_path.as_ref().unwrap().exists());
 }
 
 #[test]
@@ -1188,7 +1188,7 @@ fn cli_mutations_scan_and_list_use_only_the_injected_config() {
 fn cli_add_and_remove_roots_are_idempotent_and_preserve_notes() {
     let (dir, app) = fixture();
     config::with_test_config_path(dir.path().join("config.toml"), || {
-        let mut initial = app.config;
+        let mut initial = app.config.clone();
         initial.notes.insert("keep".into(), "unchanged".into());
         config::save_config(&initial).unwrap();
         let extra = dir.path().join("extra").to_string_lossy().into_owned();
@@ -1501,4 +1501,50 @@ fn framework_detection_uses_dependencies_not_descriptions_comments_or_script_nam
     ] {
         assert!(!stack.iter().any(|s| s == absent), "{absent}: {stack:?}");
     }
+}
+
+#[test]
+fn background_reload_keeps_current_view_and_latest_metadata() {
+    let (_dir, mut app) = fixture();
+    let id = app.projects[0].id.clone();
+    app.start_reload();
+    app.config
+        .notes
+        .insert(id.clone(), "edited during scan".into());
+    assert_eq!(app.projects.len(), 3);
+    // A second request coalesces; neither request executes IO on this thread.
+    app.needs_reload = true;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while app
+        .status_message
+        .as_deref()
+        .is_none_or(|s| !s.starts_with("Scanned"))
+    {
+        app.poll_reload();
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(
+        app.projects
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap()
+            .note
+            .as_deref(),
+        Some("edited during scan")
+    );
+}
+
+#[test]
+fn cancelled_scan_exits_without_publishing_partial_results() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "Cargo.toml", "[package]");
+    assert!(scanner::scan_roots_cancellable(
+        &Config {
+            roots: vec![dir.path().to_string_lossy().into_owned()],
+            ..Config::default()
+        },
+        &std::sync::atomic::AtomicBool::new(true)
+    )
+    .is_err());
 }

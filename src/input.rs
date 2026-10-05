@@ -93,7 +93,6 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Char('s') => app.next_sort(),
         KeyCode::Char('r') => {
             app.needs_reload = true;
-            app.reload();
         }
         KeyCode::Char('n') if app.selected_project().is_some() => {
             app.editing_project_id = app.selected_project().map(|p| p.id.clone());

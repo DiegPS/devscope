@@ -40,10 +40,12 @@ impl Drop for TerminalGuard {
 }
 
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> Result<()> {
+    let mut redraw = true;
+    let mut first_frame = true;
     loop {
-        let size = terminal.size()?;
-        app.viewport = (size.width, size.height);
-        terminal.draw(|frame| ui::draw(frame, app))?;
+        if app.should_quit {
+            break;
+        }
 
         if let Some(ref rx) = app.ports_rx {
             match rx.try_recv() {
@@ -55,6 +57,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
                         }
                     }
                     app.ports_rx = None;
+                    redraw = true;
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => app.ports_rx = None,
                 Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -62,7 +65,8 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
         }
 
         if app.needs_reload {
-            app.reload();
+            app.start_reload();
+            redraw = true;
         }
 
         if app.should_quit {
@@ -72,12 +76,28 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
         if let Some(pending) = app.pending_action.take() {
             execute_open_action(&pending, app);
             terminal.clear()?;
+            redraw = true;
         }
 
-        app.poll_hydration_results();
+        redraw |= app.poll_reload();
+        redraw |= app.poll_hydration_results();
+        if redraw {
+            let size = terminal.size()?;
+            app.viewport = (size.width, size.height);
+            terminal.draw(|frame| ui::draw(frame, app))?;
+            redraw = false;
+            if first_frame {
+                app.start_background_jobs();
+                first_frame = false;
+            }
+        }
 
         if event::poll(std::time::Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
+            let event = event::read()?;
+            if matches!(event, Event::Resize(_, _)) {
+                redraw = true;
+            }
+            if let Event::Key(key) = event {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
@@ -85,6 +105,7 @@ fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App
                     break;
                 }
                 input::handle_key_event(app, key);
+                redraw = true;
             }
         }
     }
