@@ -40,7 +40,7 @@ impl Default for Theme {
                 .fg(Color::Rgb(133, 221, 212))
                 .add_modifier(ratatui::style::Modifier::BOLD),
             text: Style::default().fg(Color::Rgb(222, 226, 230)),
-            dim: Style::default().fg(Color::Rgb(107, 114, 128)),
+            dim: Style::default().fg(Color::Rgb(148, 163, 184)),
             muted: Style::default().fg(Color::Rgb(148, 163, 184)),
             header: Style::default()
                 .fg(Color::Rgb(255, 214, 102))
@@ -52,7 +52,7 @@ impl Default for Theme {
             active: Style::default().fg(Color::Rgb(122, 222, 122)),
             paused: Style::default().fg(Color::Rgb(255, 199, 95)),
             stale: Style::default().fg(Color::Rgb(148, 163, 184)),
-            archived: Style::default().fg(Color::Rgb(255, 117, 117)),
+            archived: Style::default().fg(Color::Rgb(148, 163, 184)),
             dirty: Style::default().fg(Color::Rgb(255, 135, 107)),
             clean: Style::default().fg(Color::Rgb(122, 222, 122)),
             warning: Style::default().fg(Color::Rgb(255, 199, 95)),
@@ -79,5 +79,52 @@ impl Default for Theme {
                 .add_modifier(ratatui::style::Modifier::BOLD),
             command: Style::default().fg(Color::Rgb(133, 221, 212)),
         }
+    }
+}
+
+impl Theme {
+    pub fn named(name: &str) -> Self {
+        let mut theme = Self::default();
+        if name.eq_ignore_ascii_case("light") {
+            let text = Style::default().fg(Color::Rgb(25, 40, 55));
+            let muted = Style::default().fg(Color::Rgb(75, 90, 105));
+            let accent = Style::default().fg(Color::Rgb(0, 100, 110));
+            let good = Style::default().fg(Color::Rgb(20, 110, 45));
+            let warn = Style::default().fg(Color::Rgb(135, 85, 0));
+            let bad = Style::default().fg(Color::Rgb(170, 35, 35));
+            theme.text = text;
+            theme.dim = muted;
+            theme.muted = muted;
+            theme.footer = muted;
+            theme.footer_hint = text;
+            theme.footer_sep = muted;
+            theme.border = muted;
+            theme.title = accent.add_modifier(ratatui::style::Modifier::BOLD);
+            theme.header = warn.add_modifier(ratatui::style::Modifier::BOLD);
+            theme.section_title = theme.header;
+            theme.table_header = theme.title;
+            theme.footer_key = theme.title;
+            theme.count = accent;
+            theme.filter = warn;
+            theme.command = accent;
+            theme.stack = accent;
+            theme.note = warn;
+            theme.ahead_behind = accent;
+            theme.active = good;
+            theme.clean = good;
+            theme.health_good = good;
+            theme.paused = warn;
+            theme.warning = warn;
+            theme.health_warn = warn;
+            theme.dirty = bad;
+            theme.health_bad = bad;
+            theme.archived = muted;
+            theme.stale = muted;
+            theme.selected = Style::default()
+                .bg(Color::Rgb(220, 235, 238))
+                .fg(Color::Rgb(25, 40, 55))
+                .add_modifier(ratatui::style::Modifier::BOLD);
+        }
+        theme
     }
 }

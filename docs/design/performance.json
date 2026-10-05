@@ -1,0 +1,215 @@
+{
+  "before": {
+    "summary": {
+      "first_frame_ms": {
+        "median": 108.126,
+        "min": 98.376,
+        "max": 165.057
+      },
+      "quit_process_ms": {
+        "median": 8.123,
+        "min": 7.787,
+        "max": 9.853
+      },
+      "quit_terminal_ms": {
+        "median": 1.395,
+        "min": 1.178,
+        "max": 1.686
+      },
+      "scan_duration_ms": {
+        "median": 60.0,
+        "min": 56,
+        "max": 128
+      }
+    },
+    "samples": [
+      {
+        "first_frame_ms": 103.99340000003576,
+        "quit_process_ms": 8.138700039125979,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.4377000043168664,
+        "scan_duration_ms": 63
+      },
+      {
+        "first_frame_ms": 108.6426000110805,
+        "quit_process_ms": 8.443999977316707,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.4654999831691384,
+        "scan_duration_ms": 60
+      },
+      {
+        "first_frame_ms": 162.99099999014288,
+        "quit_process_ms": 8.476999995764345,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.5073000104166567,
+        "scan_duration_ms": 124
+      },
+      {
+        "first_frame_ms": 103.20419998606667,
+        "quit_process_ms": 7.78729998273775,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.1910999892279506,
+        "scan_duration_ms": 56
+      },
+      {
+        "first_frame_ms": 104.83229998499155,
+        "quit_process_ms": 8.289900026284158,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.6862000338733196,
+        "scan_duration_ms": 58
+      },
+      {
+        "first_frame_ms": 98.37560000596568,
+        "quit_process_ms": 7.851500005926937,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.441099971998483,
+        "scan_duration_ms": 59
+      },
+      {
+        "first_frame_ms": 164.348499965854,
+        "quit_process_ms": 7.9193999990820885,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.233499962836504,
+        "scan_duration_ms": 128
+      },
+      {
+        "first_frame_ms": 108.39099995791912,
+        "quit_process_ms": 8.107800036668777,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.1775000020861626,
+        "scan_duration_ms": 57
+      },
+      {
+        "first_frame_ms": 165.0571000063792,
+        "quit_process_ms": 8.077600039541721,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.2858000118285418,
+        "scan_duration_ms": 128
+      },
+      {
+        "first_frame_ms": 107.86170000210404,
+        "quit_process_ms": 9.852999995928258,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.3532000011764467,
+        "scan_duration_ms": 60
+      }
+    ]
+  },
+  "after": {
+    "summary": {
+      "first_frame_ms": {
+        "median": 103.683,
+        "min": 93.847,
+        "max": 152.877
+      },
+      "quit_process_ms": {
+        "median": 6.261,
+        "min": 5.862,
+        "max": 18.785
+      },
+      "quit_terminal_ms": {
+        "median": 1.517,
+        "min": 1.293,
+        "max": 7.306
+      },
+      "scan_duration_ms": {
+        "median": 62.0,
+        "min": 58,
+        "max": 119
+      }
+    },
+    "samples": [
+      {
+        "first_frame_ms": 104.6525000128895,
+        "quit_process_ms": 6.02119998075068,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.3679999974556267,
+        "scan_duration_ms": 61
+      },
+      {
+        "first_frame_ms": 137.40749994758517,
+        "quit_process_ms": 5.861799989361316,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.553200010675937,
+        "scan_duration_ms": 88
+      },
+      {
+        "first_frame_ms": 93.91860000323504,
+        "quit_process_ms": 6.155500013846904,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.5699000214226544,
+        "scan_duration_ms": 59
+      },
+      {
+        "first_frame_ms": 93.84669997962192,
+        "quit_process_ms": 6.034799967892468,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.4808999840170145,
+        "scan_duration_ms": 59
+      },
+      {
+        "first_frame_ms": 102.71409997949377,
+        "quit_process_ms": 6.366099987644702,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.8386999727226794,
+        "scan_duration_ms": 63
+      },
+      {
+        "first_frame_ms": 94.14360002847388,
+        "quit_process_ms": 11.800299980677664,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 7.306499988771975,
+        "scan_duration_ms": 58
+      },
+      {
+        "first_frame_ms": 151.22050000354648,
+        "quit_process_ms": 6.6837999620474875,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.441399974282831,
+        "scan_duration_ms": 116
+      },
+      {
+        "first_frame_ms": 152.87729998817667,
+        "quit_process_ms": 18.785499967634678,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.553499954752624,
+        "scan_duration_ms": 119
+      },
+      {
+        "first_frame_ms": 119.34739997377619,
+        "quit_process_ms": 10.392099968157709,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.3682999997399747,
+        "scan_duration_ms": 67
+      },
+      {
+        "first_frame_ms": 100.62029998516664,
+        "quit_process_ms": 6.140800018329173,
+        "exit_code": 0,
+        "terminal_restored": true,
+        "quit_terminal_ms": 1.2925000046379864,
+        "scan_duration_ms": 59
+      }
+    ]
+  },
+  "config_unchanged": true
+}

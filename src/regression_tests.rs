@@ -69,6 +69,233 @@ fn render(app: &App, width: u16, height: u16) -> String {
 }
 
 #[test]
+fn help_scroll_reaches_the_end_and_close_hint_stays_visible() {
+    let (_dir, mut app) = fixture();
+    app.viewport = (80, 24);
+    key(&mut app, KeyCode::Char('?'));
+    let first = render(&app, 80, 24);
+    assert!(first.contains("Esc / ? close"));
+    assert!(!first.contains("Ctrl+C   Quit"));
+    key(&mut app, KeyCode::End);
+    let last = render(&app, 80, 24);
+    assert_ne!(first, last);
+    assert!(last.contains("Ctrl+C   Quit"));
+    assert!(last.contains("Esc / ? close"));
+    assert_eq!(app.help_scroll, crate::ui::help_scroll_limit(&app));
+    key(&mut app, KeyCode::Down);
+    assert_eq!(app.help_scroll, crate::ui::help_scroll_limit(&app));
+    key(&mut app, KeyCode::Home);
+    assert_eq!(app.help_scroll, 0);
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.mode, Mode::Normal);
+}
+
+#[test]
+fn compact_header_and_border_context_preserve_nine_project_rows_at_80x24() {
+    let (_dir, mut app) = fixture();
+    let template = app.projects[0].clone();
+    app.projects = (0..24)
+        .map(|i| {
+            let mut project = template.clone();
+            project.name = format!("project-{i:02}");
+            project.id = project.name.clone();
+            project
+        })
+        .collect();
+    app.total_projects = 24;
+    app.apply_filter_and_sort();
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|frame| crate::ui::draw(frame, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let row = |y: usize| {
+        buffer.content[y * 80..(y + 1) * 80]
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>()
+    };
+    assert!(row(0).contains("ds"));
+    assert!(row(1).contains("Projects 1-9/24"));
+    assert!(row(1).contains("filter: all"));
+    assert!(row(1).contains("sort: name"));
+    for i in 0..9 {
+        assert!(row(i + 3).contains(&format!("project-{i:02}")));
+    }
+    assert!(!row(12).contains("project-09"));
+    assert!(!render(&app, 80, 24).contains("Overview"));
+}
+
+#[test]
+fn details_show_a_long_name_once_without_a_duplicate_name_field() {
+    let (_dir, mut app) = fixture();
+    let name = "project-with-a-name-that-is-longer-than-a-normal-panel-and-ends-here";
+    app.projects[0].name = name.into();
+    let screen = render(&app, 80, 24);
+    assert!(screen.contains(name));
+    // List header Name still exists; details must not add its own Name row.
+    let area = crate::ui::layout::create_main_layout(ratatui::layout::Rect::new(0, 0, 80, 24));
+    let details = crate::ui::layout::create_content_layout(area[1], app.view_mode)[1];
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|frame| crate::ui::draw(frame, &app)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .chunks(80)
+        .skip(details.y as usize)
+        .take(details.height as usize)
+        .flat_map(|row| row.iter().map(|cell| cell.symbol()))
+        .collect::<String>();
+    assert_eq!(text.matches(name).count(), 1);
+    assert!(!text.contains("Name"));
+}
+
+#[test]
+fn focused_details_reveal_long_values_commands_ports_and_all_health_items() {
+    let (_dir, mut app) = fixture();
+    app.viewport = (80, 24);
+    app.projects[0].path =
+        "/company/very-long-workspace-path/services/project-with-long-name".into();
+    app.projects[0].note = Some("note-start: ".to_string() + &"long text ".repeat(30) + "note-end");
+    app.projects[0].ports = vec![3000, 8080];
+    app.projects[0].health.positives = (0..12).map(|i| format!("positive-{i}")).collect();
+    let id = app.selected_project().unwrap().id.clone();
+    key(&mut app, KeyCode::Tab);
+    assert!(app.details_focus);
+    let mut screens = String::new();
+    let limit = crate::ui::details::scroll_limit(&app);
+    assert!(limit > 0);
+    for _ in 0..=limit {
+        screens.push_str(&render(&app, 80, 24));
+        key(&mut app, KeyCode::Down);
+    }
+    for value in [
+        "note-start",
+        "note-end",
+        "cargo build",
+        "3000, 8080",
+        "positive-11",
+    ] {
+        assert!(screens.contains(value), "missing {value}");
+    }
+    assert_eq!(app.selected_project().unwrap().id, id);
+    assert_eq!(app.details_scroll, limit);
+    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Down);
+    assert_ne!(app.selected_project().unwrap().id, id);
+    assert_eq!(app.details_scroll, 0);
+}
+
+#[test]
+fn confirmed_search_and_empty_states_explain_the_active_filter() {
+    let (_dir, mut app) = fixture();
+    key(&mut app, KeyCode::Char('/'));
+    for ch in "alpha".chars() {
+        key(&mut app, KeyCode::Char(ch));
+    }
+    key(&mut app, KeyCode::Enter);
+    let screen = render(&app, 80, 24);
+    assert!(screen.contains("search: alpha [Esc clear]"));
+    app.search_query = "missing".into();
+    app.apply_filter_and_sort();
+    let screen = render(&app, 80, 24);
+    assert!(screen.contains("No matching projects."));
+    assert!(screen.contains("Esc to clear search"));
+    app.projects.clear();
+    app.total_projects = 0;
+    app.apply_filter_and_sort();
+    let screen = render(&app, 80, 24);
+    assert!(screen.contains("ds add <path>"));
+    assert!(!screen.contains("No matching projects."));
+}
+
+#[test]
+fn long_editor_text_keeps_cursor_end_and_save_cancel_hints_visible() {
+    let (_dir, mut app) = fixture();
+    key(&mut app, KeyCode::Char('n'));
+    app.note_input = "long prefix ".repeat(30) + "VISIBLE-END";
+    let screen = render(&app, 80, 24);
+    assert!(screen.contains("VISIBLE-END█"));
+    assert!(screen.contains("Enter save / Esc cancel"));
+    key(&mut app, KeyCode::Esc);
+    assert!(!app.config_save_path.as_ref().unwrap().exists());
+    app.mode = Mode::Search;
+    app.search_query = "日本 ".repeat(30) + "QUERY-END";
+    let screen = render(&app, 80, 24);
+    assert!(screen.contains("QUERY-END█"));
+    assert!(screen.contains("Enter keep / Esc clear"));
+}
+
+#[test]
+fn menu_navigation_can_reach_and_confirm_the_last_action_in_small_windows() {
+    let (_dir, mut app) = fixture();
+    app.viewport = (80, 12);
+    key(&mut app, KeyCode::Char('o'));
+    key(&mut app, KeyCode::End);
+    let action = app.config.open.actions.last().unwrap().clone();
+    let screen = render(&app, 80, 12);
+    assert!(screen.contains(&action.name));
+    assert!(screen.contains("Esc cancel"));
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!(
+        app.pending_action.as_ref().unwrap().action.name,
+        action.name
+    );
+    assert!(!app.config_save_path.unwrap().exists());
+}
+
+#[test]
+fn errors_use_error_style_and_survive_navigation_while_preserving_note_draft() {
+    let (dir, mut app) = fixture();
+    app.config_save_path = Some(dir.path().join("alpha")); // existing directory cannot be replaced
+    key(&mut app, KeyCode::Char('n'));
+    app.note_input = "draft".into();
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.message_level, crate::app::MessageLevel::Error);
+    assert_eq!(app.note_input, "draft");
+    let screen = render(&app, 80, 24);
+    assert!(screen.contains("Error"));
+    assert!(screen.contains("Could not save"));
+    key(&mut app, KeyCode::Down);
+    assert!(app.status_message.is_some());
+}
+
+#[test]
+fn layout_preserves_original_density_from_125_and_accounts_for_short_windows() {
+    use ratatui::layout::Rect;
+    let a = crate::ui::layout::create_content_layout(Rect::new(0, 0, 124, 27), ViewMode::Detailed);
+    let b = crate::ui::layout::create_content_layout(Rect::new(0, 0, 125, 27), ViewMode::Detailed);
+    assert_eq!(a[0].width, 124);
+    assert_eq!(b[0].height, 27);
+    assert!(b[1].width >= 48);
+    let short =
+        crate::ui::layout::create_content_layout(Rect::new(0, 0, 125, 15), ViewMode::Detailed);
+    assert_eq!(short[0].height, 15);
+    assert_eq!(short[1].height, 15);
+    let wide =
+        crate::ui::layout::create_content_layout(Rect::new(0, 0, 160, 42), ViewMode::Detailed);
+    assert!(wide[0].width >= 96);
+    assert!(wide[1].width >= 48);
+}
+
+#[test]
+fn visual_preferences_apply_without_changing_project_data_or_saved_config() {
+    let mut config = Config::default();
+    config.ui.right_panel = false;
+    let app = App::new(config);
+    assert_eq!(app.view_mode, ViewMode::Compact);
+    let (_dir, mut app) = fixture();
+    let projects = serde_json::to_string(&app.projects).unwrap();
+    app.config.ui.theme = "light".into();
+    app.config.ui.show_icons = false;
+    let screen = render(&app, 160, 45);
+    assert!(screen.contains("warn"));
+    assert!(!screen.contains("✓"));
+    assert_eq!(projects, serde_json::to_string(&app.projects).unwrap());
+    assert!(!app.config_save_path.unwrap().exists());
+}
+
+#[test]
 fn config_defaults_accept_old_minimal_files_and_unknown_fields() {
     let config: Config = toml::from_str("roots=[]\nfuture_option=true\n").unwrap();
     assert_eq!(config.max_depth, 4);

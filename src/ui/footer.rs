@@ -1,193 +1,212 @@
-use ratatui::layout::Rect;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
-use ratatui::Frame;
+use crate::{
+    app::{App, Mode},
+    ui::{text, theme::Theme},
+};
+use ratatui::{
+    layout::Rect,
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph},
+    Frame,
+};
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::App;
-use crate::ui::theme::Theme;
-
-pub fn render_normal(frame: &mut Frame, area: Rect, _app: &App, theme: &Theme) {
-    let line = build_footer(area.width, _app, theme);
-    let footer = Paragraph::new(line).style(theme.footer);
-    frame.render_widget(footer, area);
-}
-
-pub fn render_search(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let line = Line::from(vec![
-        Span::styled("  ", theme.footer_key),
-        Span::styled("Search ", theme.footer_key),
-        Span::styled(&app.search_query, theme.text),
-        Span::styled("\u{2588}", theme.text),
-        Span::styled("  (Esc cancel, Enter done)", theme.dim),
-    ]);
-    let footer = Paragraph::new(line).style(theme.footer);
-    frame.render_widget(footer, area);
-}
-
-pub fn render_note_edit(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let line = Line::from(vec![
-        Span::styled("  ", theme.footer_key),
-        Span::styled("Note ", theme.footer_key),
-        Span::styled(&app.note_input, theme.text),
-        Span::styled("\u{2588}", theme.text),
-        Span::styled("  (Enter save, Esc cancel)", theme.dim),
-    ]);
-    let footer = Paragraph::new(line).style(theme.footer);
-    frame.render_widget(footer, area);
-}
-
-pub fn render_open_menu(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let sep = Span::styled(" \u{00B7} ", theme.footer_sep);
-    let mut spans: Vec<Span> = Vec::new();
-
-    spans.push(Span::styled("  OPEN", theme.footer_key));
-    spans.push(sep.clone());
-
-    for (i, action) in app.config.open.actions.iter().enumerate() {
-        if i > 0 {
-            spans.push(sep.clone());
-        }
-        spans.push(Span::styled(
-            format!("{}", action.key_char()),
-            theme.footer_key,
-        ));
-        spans.push(Span::styled(format!(" {}", action.name), theme.footer_hint));
-    }
-
-    spans.push(sep);
-    spans.push(Span::styled("Esc cancel", theme.dim));
-
-    let line = Line::from(spans);
-    let footer = Paragraph::new(line).style(theme.footer);
-    frame.render_widget(footer, area);
-}
-
-pub fn render_config_menu(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let sep = Span::styled(" \u{00B7} ", theme.footer_sep);
-    let mut spans: Vec<Span> = Vec::new();
-
-    spans.push(Span::styled("  CONFIG", theme.footer_key));
-    spans.push(sep.clone());
-
-    for (i, action) in app.config.open.actions.iter().enumerate() {
-        if i > 0 {
-            spans.push(sep.clone());
-        }
-        spans.push(Span::styled(
-            format!("{}", action.key_char()),
-            theme.footer_key,
-        ));
-        spans.push(Span::styled(format!(" {}", action.name), theme.footer_hint));
-    }
-
-    spans.push(sep);
-    spans.push(Span::styled("Esc cancel", theme.dim));
-
-    let line = Line::from(spans);
-    let footer = Paragraph::new(line).style(theme.footer);
-    frame.render_widget(footer, area);
-}
-
-pub fn render_status_change(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let options: Vec<Span> = app
-        .status_options
-        .iter()
-        .enumerate()
-        .flat_map(|(i, status)| {
-            let style = if i == app.status_selected {
-                theme.footer_key
-            } else {
-                theme.dim
-            };
-            let mut items = vec![Span::styled(format!(" {} ", status.as_str()), style)];
-            if i + 1 < app.status_options.len() {
-                items.push(Span::styled(" \u{2502} ", theme.dim));
-            }
-            items
-        })
-        .collect();
-
-    let mut line_items = vec![
-        Span::styled("  ", theme.footer_key),
-        Span::styled("Status ", theme.footer_key),
+pub fn render_normal(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let primary = [
+        ("↑↓", if app.details_focus { "scroll" } else { "nav" }),
+        ("/", "search"),
+        ("o", "open"),
     ];
-    line_items.extend(options);
-    line_items.push(Span::styled(
-        "  (arrows select, Enter confirm, Esc cancel)",
-        theme.dim,
-    ));
-
-    let line = Line::from(line_items);
-    let footer = Paragraph::new(line).style(theme.footer);
-    frame.render_widget(footer, area);
-}
-
-fn build_footer(width: u16, app: &App, theme: &Theme) -> Line<'static> {
-    let detailed_vertical = matches!(app.view_mode, crate::app::ViewMode::Detailed) && width < 125;
-    let primary = vec![("\u{2191}\u{2193}", "nav"), ("/", "search")];
-    let tail = vec![("D", "view"), ("?", "help"), ("q", "quit")];
-
-    let optional: Vec<(&str, &str)> = if width < 110 || detailed_vertical {
-        vec![("f", "filter"), ("s", "sort"), ("r", "reload")]
-    } else {
-        vec![
-            ("PgUp/PgDn", "jump"),
-            ("f", "filter"),
-            ("s", "sort"),
-            ("n", "note"),
-            ("m", "status"),
-            ("r", "reload"),
-            ("o", "open"),
-            (",", "config"),
-            ("Enter", "visit"),
-        ]
-    };
-
-    let mut pairs = primary.clone();
-    let mut selected_optional: Vec<(&str, &str)> = Vec::new();
-    let max_width = width as usize;
-
-    for candidate in optional {
-        let mut trial = primary.clone();
-        trial.extend(selected_optional.iter().copied());
-        trial.push(candidate);
-        trial.extend(tail.iter().copied());
-
-        if footer_width(&trial) <= max_width {
-            selected_optional.push(candidate);
+    let tail = [("?", "help"), ("q", "quit")];
+    let mut pairs = primary.to_vec();
+    for pair in [
+        ("Tab", "focus"),
+        ("f", "filter"),
+        ("s", "sort"),
+        ("n", "note"),
+        ("m", "status"),
+        ("r", "reload"),
+        ("D", "view"),
+        (",", "config"),
+        ("Enter", "visit"),
+    ] {
+        let mut trial = pairs.clone();
+        trial.push(pair);
+        trial.extend(tail);
+        if footer_width(&trial) <= area.width as usize {
+            pairs.push(pair);
         }
     }
-
-    pairs.extend(selected_optional);
     pairs.extend(tail);
-
-    let sep = Span::styled(" \u{00B7} ", theme.footer_sep);
-
-    let mut spans: Vec<Span> = Vec::new();
+    let mut spans = Vec::new();
     for (i, (key, label)) in pairs.iter().enumerate() {
         if i > 0 {
-            spans.push(sep.clone());
+            spans.push(Span::styled(" · ", theme.footer_sep));
         }
         spans.push(Span::styled(key.to_string(), theme.footer_key));
         spans.push(Span::styled(format!(" {}", label), theme.footer_hint));
     }
-
-    let mut line_spans = vec![Span::styled("  ", theme.footer_sep)];
-    line_spans.extend(spans);
-
-    Line::from(line_spans)
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn footer_width(pairs: &[(&str, &str)]) -> usize {
-    let base_padding = 2usize;
-    let sep_width = " \u{00B7} ".width();
-
-    let content_width: usize = pairs
+    pairs
         .iter()
-        .map(|(key, label)| key.width() + 1 + label.width())
-        .sum();
+        .map(|(k, v)| k.width() + v.width() + 1)
+        .sum::<usize>()
+        + pairs.len().saturating_sub(1) * 3
+}
 
-    let separators = pairs.len().saturating_sub(1) * sep_width;
-    base_padding + content_width + separators
+fn render_editor(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    value: &str,
+    hint: &str,
+    theme: &Theme,
+) {
+    let hint = if area.width >= 50 { hint } else { " ↵ / Esc" };
+    let budget = (area.width as usize).saturating_sub(label.width() + hint.width() + 2);
+    let value = text::tail(value, budget);
+    let line = Line::from(vec![
+        Span::styled(format!("{} ", label), theme.footer_key),
+        Span::styled(value, theme.text),
+        Span::styled("█", theme.text),
+        Span::styled(hint.to_string(), theme.muted),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+pub fn render_search(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    render_editor(
+        frame,
+        area,
+        "Search",
+        &app.search_query,
+        " · Enter keep / Esc clear",
+        theme,
+    );
+}
+pub fn render_note_edit(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    render_editor(
+        frame,
+        area,
+        "Note",
+        &app.note_input,
+        " · Enter save / Esc cancel",
+        theme,
+    );
+}
+
+pub fn render_menu(frame: &mut Frame, root: Rect, app: &App, theme: &Theme) {
+    let status = app.mode == Mode::ChangingStatus;
+    let selected = if status {
+        app.status_selected
+    } else {
+        app.menu_selected
+    };
+    let items: Vec<String> = if status {
+        app.status_options
+            .iter()
+            .map(|s| s.as_str().to_string())
+            .collect()
+    } else {
+        app.config
+            .open
+            .actions
+            .iter()
+            .map(|a| format!("[{}] {}", a.key_char(), a.name))
+            .collect()
+    };
+    let title = match app.mode {
+        Mode::ChangingStatus => " Status ",
+        Mode::ConfigMenu => " Open config ",
+        _ => " Open project ",
+    };
+    let area = text::popup(
+        root,
+        72,
+        (items.len().saturating_add(5).min(u16::MAX as usize) as u16).max(6),
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.title)
+        .title(title)
+        .title_bottom(" ↑↓ select | Enter / key | Esc cancel ");
+    let inner = block.inner(area);
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+    let context = if status {
+        app.selected_project()
+            .map(|p| p.name.clone())
+            .unwrap_or_default()
+    } else if app.mode == Mode::ConfigMenu {
+        "Configuration directory".into()
+    } else {
+        app.selected_project()
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| "No project selected".into())
+    };
+    frame.render_widget(
+        Paragraph::new(crate::ui::table::truncate_end(
+            &context,
+            inner.width.saturating_sub(2) as usize,
+        ))
+        .style(theme.title),
+        Rect::new(inner.x, inner.y, inner.width, inner.height.min(1)),
+    );
+    let mut lines = Vec::new();
+    let mut selected_start = 0;
+    for (i, item) in items.iter().enumerate() {
+        if i == selected {
+            selected_start = lines.len();
+        }
+        lines.extend(text::wrap(
+            vec![Line::from(Span::styled(
+                format!("{} {}", if i == selected { ">" } else { " " }, item),
+                if i == selected {
+                    theme.selected
+                } else {
+                    theme.text
+                },
+            ))],
+            inner.width,
+        ));
+    }
+    let visible = inner.height.saturating_sub(2) as usize;
+    let scroll = selected_start
+        .saturating_sub(visible.saturating_sub(1))
+        .min(lines.len().saturating_sub(visible));
+    frame.render_widget(
+        Paragraph::new(
+            lines
+                .into_iter()
+                .skip(scroll)
+                .take(visible)
+                .collect::<Vec<_>>(),
+        ),
+        Rect::new(
+            inner.x,
+            inner.y + inner.height.min(1),
+            inner.width,
+            visible as u16,
+        ),
+    );
+    let footer = if let Some(msg) = &app.status_message {
+        crate::ui::table::truncate_end(msg, inner.width as usize)
+    } else {
+        format!(
+            " {}/{} options",
+            if items.is_empty() { 0 } else { selected + 1 },
+            items.len()
+        )
+    };
+    frame.render_widget(
+        Paragraph::new(footer).style(theme.muted),
+        Rect::new(
+            inner.x,
+            inner.y + inner.height.saturating_sub(1),
+            inner.width,
+            inner.height.min(1),
+        ),
+    );
 }

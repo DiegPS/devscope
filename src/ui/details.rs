@@ -9,36 +9,110 @@ use crate::project::{ArtifactKind, DirtyStatus, HealthLevel, ProjectStatus};
 use crate::ui::theme::Theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border)
+        .border_style(if app.details_focus {
+            theme.title
+        } else {
+            theme.border
+        })
         .title(Span::styled(" Details ", theme.header));
-
     let Some(project) = app.selected_project() else {
-        let empty = Paragraph::new(Line::from(Span::styled("  No project selected", theme.dim)))
-            .block(block);
-        frame.render_widget(empty, area);
+        frame.render_widget(
+            Paragraph::new("  Select a project to see its details")
+                .style(theme.dim)
+                .block(block),
+            area,
+        );
         return;
     };
+    let inner = block.inner(area);
+    let header = header_lines(project, inner.width, theme);
+    let header_height = inner.height.min(header.len().min(u16::MAX as usize) as u16);
+    let content = Rect::new(
+        inner.x,
+        inner.y + header_height,
+        inner.width,
+        inner.height.saturating_sub(header_height),
+    );
+    let lines = content_lines(app, area, theme);
+    let limit = lines.len().saturating_sub(content.height as usize);
+    let scroll = app.details_scroll.min(limit);
+    let end = (scroll + content.height as usize).min(lines.len());
+    let hint = if app.details_focus {
+        "Tab list | arrows scroll"
+    } else {
+        "Tab details"
+    };
+    block = block.title_bottom(Span::styled(
+        format!(
+            " {} | {}-{}/{} ",
+            hint,
+            if lines.is_empty() { 0 } else { scroll + 1 },
+            end,
+            lines.len()
+        ),
+        theme.footer_key,
+    ));
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(header),
+        Rect::new(inner.x, inner.y, inner.width, header_height),
+    );
+    frame.render_widget(
+        Paragraph::new(
+            lines
+                .into_iter()
+                .skip(scroll)
+                .take(content.height as usize)
+                .collect::<Vec<_>>(),
+        ),
+        content,
+    );
+}
 
-    let inner_w = area.width.saturating_sub(4).max(20) as usize;
+pub fn scroll_limit(app: &App) -> usize {
+    let area = Rect::new(0, 0, app.viewport.0, app.viewport.1);
+    let vertical = crate::ui::layout::create_main_layout(area);
+    let panels = crate::ui::layout::create_content_layout(vertical[1], app.view_mode);
+    let Some(&details) = panels.get(1) else {
+        return 0;
+    };
+    let theme = Theme::named(&app.config.ui.theme);
+    let header_height = app
+        .selected_project()
+        .map(|project| header_lines(project, details.width.saturating_sub(2), &theme).len())
+        .unwrap_or(0);
+    content_lines(app, details, &theme)
+        .len()
+        .saturating_sub((details.height.saturating_sub(2) as usize).saturating_sub(header_height))
+}
+
+fn header_lines(
+    project: &crate::project::Project,
+    width: u16,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    let mut lines = crate::ui::text::wrap(
+        vec![Line::from(Span::styled(
+            format!("  {}", project.name),
+            theme.title,
+        ))],
+        width,
+    );
+    lines.push(build_summary_line(project, width as usize, 12, theme));
+    lines
+}
+
+fn content_lines(app: &App, area: Rect, theme: &Theme) -> Vec<Line<'static>> {
+    let Some(project) = app.selected_project() else {
+        return Vec::new();
+    };
+    let inner_w = area.width.saturating_sub(4).max(1) as usize;
     let label_width = detail_label_width(inner_w);
     let mut lines: Vec<Line> = Vec::new();
 
-    lines.push(Line::from(Span::styled(
-        format!("  {}", truncate_end(&project.name, inner_w)),
-        theme.title,
-    )));
-    lines.push(build_summary_line(project, inner_w, label_width, theme));
-    lines.push(Line::from(""));
-
-    push_section(&mut lines, "Overview", theme);
     let path_str = project.path.display().to_string();
-    let folder = project
-        .path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(&project.name);
     let stack = if project.stack.is_empty() {
         "none".to_string()
     } else {
@@ -48,14 +122,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
 
     lines.push(aligned_line(
         "Path",
-        &truncate_middle(&path_str, value_width),
-        label_width,
-        value_width,
-        theme,
-    ));
-    lines.push(aligned_line(
-        "Folder",
-        &truncate_end(folder, value_width),
+        &path_str,
         label_width,
         value_width,
         theme,
@@ -100,75 +167,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     ));
 
     lines.push(section_separator(inner_w, theme));
-    push_section(&mut lines, "Health", theme);
-
-    let health_style = match project.health.level {
-        HealthLevel::Good => theme.health_good,
-        HealthLevel::Warn => theme.health_warn,
-        HealthLevel::Bad => theme.health_bad,
-        HealthLevel::Unknown => theme.dim,
-    };
-    let bar_width = inner_w.clamp(8, 16);
-    lines.push(Line::from(vec![
-        Span::styled(pad_label("Score", label_width), theme.dim),
-        Span::styled(health_bar(project.health.score, bar_width), health_style),
-        Span::styled(
-            format!(
-                " {} {}/100",
-                project.health.level.as_str(),
-                project.health.score
-            ),
-            health_style,
-        ),
-    ]));
-
-    let max_items = 6usize;
-    let mut shown = 0usize;
-    for warning in &project.warnings {
-        if shown >= max_items {
-            break;
-        }
-        lines.push(Line::from(Span::styled(
-            format!(
-                "    ! {}",
-                truncate_end(&warning.as_str(), inner_w.saturating_sub(6))
-            ),
-            theme.warning,
-        )));
-        shown += 1;
-    }
-
-    for positive in &project.health.positives {
-        if shown >= max_items {
-            break;
-        }
-        lines.push(Line::from(Span::styled(
-            format!(
-                "    \u{2713} {}",
-                truncate_end(positive, inner_w.saturating_sub(6))
-            ),
-            theme.clean,
-        )));
-        shown += 1;
-    }
-
-    let total_items = project.health.positives.len() + project.warnings.len();
-    if total_items > max_items {
-        lines.push(Line::from(Span::styled(
-            format!("    \u{2026} and {} more", total_items - max_items),
-            theme.dim,
-        )));
-    } else if total_items == 0 {
-        lines.push(Line::from(Span::styled("    no health data", theme.dim)));
-    }
-
-    lines.push(section_separator(inner_w, theme));
     push_section(&mut lines, "Git", theme);
 
     if let Some(git) = &project.git {
         lines.push(aligned_line(
             "Branch",
-            &truncate_end(&git.branch, value_width),
+            &git.branch,
             label_width,
             value_width,
             theme,
@@ -203,10 +207,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             format!(
                 "{} {}",
                 truncate_end(&git.last_commit_hash, 7),
-                truncate_end(
-                    &git.last_commit_message,
-                    inner_w.saturating_sub(label_width + 10)
-                )
+                git.last_commit_message
             )
         };
         lines.push(aligned_line(
@@ -220,7 +221,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         let remote = git.remote_url.as_deref().unwrap_or("none");
         lines.push(aligned_line(
             "Remote",
-            &truncate_middle(remote, value_width),
+            remote,
             label_width,
             value_width,
             theme,
@@ -259,23 +260,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     if project.commands.is_empty() {
         lines.push(Line::from(Span::styled("    none detected", theme.dim)));
     } else {
-        let shown_commands = 6usize.min(project.commands.len());
-        for command in project.commands.iter().take(shown_commands) {
+        for command in &project.commands {
             lines.push(Line::from(Span::styled(
-                format!(
-                    "    {}",
-                    truncate_end(&command.command, inner_w.saturating_sub(4))
-                ),
+                format!("    {}", command.command),
                 theme.command,
-            )));
-        }
-        if project.commands.len() > shown_commands {
-            lines.push(Line::from(Span::styled(
-                format!(
-                    "    \u{2026} and {} more",
-                    project.commands.len() - shown_commands
-                ),
-                theme.dim,
             )));
         }
     }
@@ -283,14 +271,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
     if !project.artifacts.is_empty() {
         lines.push(section_separator(inner_w, theme));
         push_section(&mut lines, "Artifacts", theme);
-        let shown_artifacts = 6usize.min(project.artifacts.len());
-        for artifact in project.artifacts.iter().take(shown_artifacts) {
-            let icon = match artifact.kind {
-                ArtifactKind::Executable | ArtifactKind::Apk => "\u{25B6}",
-                ArtifactKind::Folder
-                | ArtifactKind::Web
-                | ArtifactKind::Bundle
-                | ArtifactKind::Other => "\u{25A1}",
+        for artifact in &project.artifacts {
+            let icon = if !app.config.ui.show_icons {
+                "-"
+            } else {
+                match artifact.kind {
+                    ArtifactKind::Executable | ArtifactKind::Apk => "\u{25B6}",
+                    ArtifactKind::Folder
+                    | ArtifactKind::Web
+                    | ArtifactKind::Bundle
+                    | ArtifactKind::Other => "\u{25A1}",
+                }
             };
             let (icon_style, label_style) = if artifact.exists {
                 (theme.clean, theme.text)
@@ -299,20 +290,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             };
             lines.push(Line::from(vec![
                 Span::styled(format!("    {} ", icon), icon_style),
-                Span::styled(
-                    truncate_end(&artifact.label, inner_w.saturating_sub(6)),
-                    label_style,
-                ),
+                Span::styled(artifact.label.clone(), label_style),
             ]));
-        }
-        if project.artifacts.len() > shown_artifacts {
-            lines.push(Line::from(Span::styled(
-                format!(
-                    "    \u{2026} and {} more",
-                    project.artifacts.len() - shown_artifacts
-                ),
-                theme.dim,
-            )));
         }
     }
 
@@ -326,13 +305,64 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             .collect::<Vec<_>>()
             .join(", ");
         lines.push(Line::from(Span::styled(
-            format!("    \u{2192} {}", ports),
+            format!(
+                "    {}{}",
+                if app.config.ui.show_icons { "→ " } else { "" },
+                ports
+            ),
             theme.command,
         )));
     }
 
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, area);
+    lines.push(section_separator(inner_w, theme));
+    push_section(&mut lines, "Health", theme);
+
+    let health_style = match project.health.level {
+        HealthLevel::Good => theme.health_good,
+        HealthLevel::Warn => theme.health_warn,
+        HealthLevel::Bad => theme.health_bad,
+        HealthLevel::Unknown => theme.dim,
+    };
+    let bar_width = inner_w.clamp(8, 16);
+    lines.push(Line::from(vec![
+        Span::styled(pad_label("Score", label_width), theme.dim),
+        Span::styled(
+            if app.config.ui.show_icons {
+                health_bar(project.health.score, bar_width)
+            } else {
+                String::new()
+            },
+            health_style,
+        ),
+        Span::styled(
+            format!(
+                " {} {}/100",
+                project.health.level.as_str(),
+                project.health.score
+            ),
+            health_style,
+        ),
+    ]));
+
+    for warning in &project.warnings {
+        lines.push(Line::from(Span::styled(
+            format!("    ! {}", warning.as_str()),
+            theme.warning,
+        )));
+    }
+
+    for positive in &project.health.positives {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "    {} {}",
+                if app.config.ui.show_icons { "✓" } else { "+" },
+                positive
+            ),
+            theme.clean,
+        )));
+    }
+
+    crate::ui::text::wrap(lines, area.width.saturating_sub(2))
 }
 
 fn build_summary_line(
@@ -413,7 +443,7 @@ fn aligned_line(
     label: &str,
     value: &str,
     label_width: usize,
-    value_width: usize,
+    _value_width: usize,
     theme: &Theme,
 ) -> Line<'static> {
     let value_style = if value == "none" || value == "not available" || value == "unknown" {
@@ -423,13 +453,13 @@ fn aligned_line(
     };
     Line::from(vec![
         Span::styled(pad_label(label, label_width), theme.dim),
-        Span::styled(truncate_end(value, value_width), value_style),
+        Span::styled(value.to_string(), value_style),
     ])
 }
 
 fn pad_label(label: &str, label_width: usize) -> String {
     let width = label.width();
-    let padding = label_width.saturating_sub(width);
+    let padding = label_width.saturating_sub(width).max(1);
     format!("  {}{}", label, " ".repeat(padding))
 }
 
@@ -484,50 +514,4 @@ fn truncate_end(text: &str, max_width: usize) -> String {
     }
     result.push('\u{2026}');
     result
-}
-
-fn truncate_middle(text: &str, max_width: usize) -> String {
-    if max_width <= 1 {
-        return String::new();
-    }
-    if text.width() <= max_width {
-        return text.to_string();
-    }
-    if max_width <= 3 {
-        return "\u{2026}".to_string();
-    }
-
-    let left_width = max_width.saturating_sub(1) * 2 / 5;
-    let right_width = max_width.saturating_sub(left_width).saturating_sub(1);
-    let left = take_width(text, left_width);
-    let right = take_width_from_end(text, right_width);
-    format!("{}\u{2026}{}", left, right)
-}
-
-fn take_width(text: &str, max_width: usize) -> String {
-    let mut result = String::new();
-    let mut width = 0;
-    for ch in text.chars() {
-        let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
-        if width + char_width > max_width {
-            break;
-        }
-        result.push(ch);
-        width += char_width;
-    }
-    result
-}
-
-fn take_width_from_end(text: &str, max_width: usize) -> String {
-    let mut chars = Vec::new();
-    let mut width = 0;
-    for ch in text.chars().rev() {
-        let char_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
-        if width + char_width > max_width {
-            break;
-        }
-        chars.push(ch);
-        width += char_width;
-    }
-    chars.iter().rev().collect()
 }

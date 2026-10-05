@@ -47,8 +47,11 @@ Key modules:
 | `o` | Open menu (leader key) |
 | `Enter` | Record visit |
 | `D` | Toggle compact/detailed view |
+| `Tab` / `Shift+Tab` | Switch list/details focus; arrows, j/k and page/home/end keys scroll focused details |
 | `?` | Help overlay |
 | `↑↓` / `j k` | Navigate list |
+
+Help scrolls with arrows/j/k, PageUp/PageDown and Home/End. Open/config menus support arrows and Enter as well as the original action keys. UI preferences: right_panel chooses the initial view, show_icons controls decorative indicators, and theme supports default/dark or light (terminal background is inherited).
 
 ## Gotchas
 - `git2` (libgit2) requires CMake + a C compiler on most platforms

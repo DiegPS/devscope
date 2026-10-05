@@ -2,129 +2,103 @@ pub mod details;
 pub mod footer;
 pub mod layout;
 pub mod table;
+pub mod text;
 pub mod theme;
 
-use ratatui::Frame;
+use crate::app::{App, MessageLevel, Mode, ViewMode};
+use ratatui::{
+    layout::Rect,
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, Paragraph},
+    Frame,
+};
+use theme::Theme;
 
-use crate::app::App;
-
-/// Main draw function for the TUI.
 pub fn draw(frame: &mut Frame, app: &App) {
     let root = frame.area();
-
-    let theme = theme::Theme::default();
-
-    // Vertical split: header, main, footer
+    let theme = Theme::named(&app.config.ui.theme);
     let vertical = layout::create_main_layout(root);
-
-    // Render header
     render_header(frame, vertical[0], app, &theme);
-
-    let main_area = layout::create_content_layout(vertical[1], app.view_mode);
-
-    table::render(frame, main_area[0], app, &theme);
-
-    if matches!(app.view_mode, crate::app::ViewMode::Detailed) {
-        details::render(frame, main_area[1], app, &theme);
+    let panels = layout::create_content_layout(vertical[1], app.view_mode);
+    table::render(frame, panels[0], app, &theme);
+    if app.view_mode == ViewMode::Detailed {
+        details::render(frame, panels[1], app, &theme);
     }
-
-    // Render footer (mode-dependent)
     match app.mode {
-        crate::app::Mode::Search => footer::render_search(frame, vertical[2], app, &theme),
-        crate::app::Mode::EditingNote => footer::render_note_edit(frame, vertical[2], app, &theme),
-        crate::app::Mode::ChangingStatus => {
-            footer::render_status_change(frame, vertical[2], app, &theme)
+        Mode::Search => footer::render_search(frame, vertical[2], app, &theme),
+        Mode::EditingNote => footer::render_note_edit(frame, vertical[2], app, &theme),
+        _ => footer::render_normal(frame, vertical[2], app, &theme),
+    }
+    draw_message(frame, app, &theme);
+    match app.mode {
+        Mode::Help => render_help_overlay(frame, root, app, &theme),
+        Mode::OpenMenu | Mode::ConfigMenu | Mode::ChangingStatus => {
+            footer::render_menu(frame, root, app, &theme)
         }
-        crate::app::Mode::Help => {
-            render_help_overlay(frame, root, app, &theme);
-            footer::render_normal(frame, vertical[2], app, &theme);
-        }
-        crate::app::Mode::OpenMenu => footer::render_open_menu(frame, vertical[2], app, &theme),
-        crate::app::Mode::ConfigMenu => footer::render_config_menu(frame, vertical[2], app, &theme),
-        crate::app::Mode::Normal => footer::render_normal(frame, vertical[2], app, &theme),
+        _ => {}
     }
 }
 
-fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, app: &App, theme: &theme::Theme) {
-    use ratatui::layout::{Constraint, Direction, Layout};
-    use ratatui::text::{Line, Span};
-    use ratatui::widgets::Paragraph;
-
-    let dirty_count = app
+fn render_header(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let dirty = app
         .projects
         .iter()
-        .filter(|project| {
-            project
-                .git
+        .filter(|p| {
+            p.git
                 .as_ref()
-                .is_some_and(|git| git.dirty_status == crate::project::DirtyStatus::Dirty)
+                .is_some_and(|g| g.dirty_status == crate::project::DirtyStatus::Dirty)
         })
         .count();
-
-    if area.width < 92 {
-        let compact = if let Some(ref msg) = app.status_message {
-            Line::from(vec![
-                Span::styled(" ds ", theme.title),
-                Span::styled("· ", theme.dim),
-                Span::styled(msg.as_str(), theme.active),
-            ])
-        } else {
-            Line::from(vec![
-                Span::styled(" ds ", theme.title),
-                Span::styled(format!("{} ", app.filtered_count()), theme.count),
-                Span::styled("/ ", theme.dim),
-                Span::styled(format!("{} ", app.total_projects), theme.muted),
-                Span::styled("· ", theme.dim),
-                Span::styled(format_scan_time(app.scan_duration_ms), theme.muted),
-            ])
-        };
-        frame.render_widget(Paragraph::new(compact), area);
-        return;
-    };
-
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(0), Constraint::Length(58)])
-        .split(area);
-
-    let title = if let Some(ref msg) = app.status_message {
-        Line::from(vec![
-            Span::styled(" ds ", theme.title),
-            Span::styled("· ", theme.dim),
-            Span::styled(msg.as_str(), theme.active),
-        ])
-    } else {
-        Line::from(vec![
-            Span::styled(" ds ", theme.title),
-            Span::styled("· ", theme.dim),
-            Span::styled(format!("{}", app.total_projects), theme.count),
-            Span::styled(" projects ", theme.muted),
-            Span::styled("· ", theme.dim),
-            Span::styled(format_scan_time(app.scan_duration_ms), theme.muted),
-        ])
-    };
-    frame.render_widget(Paragraph::new(title), chunks[0]);
-
-    let info = Line::from(vec![
-        Span::styled("filter ", theme.muted),
-        Span::styled(app.filter.as_str(), theme.filter),
-        Span::styled(" · ", theme.dim),
-        Span::styled("sort ", theme.muted),
-        Span::styled(app.sort.as_str(), theme.footer_key),
-        Span::styled(" · ", theme.dim),
-        Span::styled("view ", theme.muted),
-        Span::styled(app.view_mode.as_str(), theme.footer_hint),
-        Span::styled(" · ", theme.dim),
+    let top = Line::from(vec![
+        Span::styled(" ds ", theme.title),
         Span::styled(
-            format!("{}/{}", app.filtered_count(), app.total_projects),
+            format!("{}/{} projects", app.filtered_count(), app.total_projects),
             theme.count,
         ),
-        Span::styled(" · ", theme.dim),
-        Span::styled(format!("{} dirty", dirty_count), theme.dirty),
+        Span::styled(
+            format!(" · {}", format_scan_time(app.scan_duration_ms)),
+            theme.muted,
+        ),
+        Span::styled(
+            format!(" · {} dirty", dirty),
+            if dirty > 0 { theme.dirty } else { theme.dim },
+        ),
     ]);
+    frame.render_widget(Paragraph::new(top), area);
+}
+
+fn draw_message(frame: &mut Frame, app: &App, theme: &Theme) {
+    let Some(msg) = &app.status_message else {
+        return;
+    };
+    let (label, style) = match app.message_level {
+        MessageLevel::Error => ("Error", theme.health_bad),
+        MessageLevel::Warning => ("Warning", theme.warning),
+        MessageLevel::Info => ("Info", theme.count),
+    };
+    let root = frame.area();
+    let lines = text::wrap(
+        vec![Line::from(Span::styled(msg.clone(), style))],
+        root.width.saturating_sub(2),
+    );
+    let height = (lines.len().min(u16::MAX as usize) as u16)
+        .saturating_add(2)
+        .min(root.height.saturating_sub(3));
+    let area = Rect::new(
+        root.x,
+        root.y + root.height.saturating_sub(height + 1),
+        root.width,
+        height,
+    );
+    frame.render_widget(Clear, area);
     frame.render_widget(
-        Paragraph::new(info).alignment(ratatui::layout::Alignment::Right),
-        chunks[1],
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(style)
+                .title(format!(" {} | next action dismisses ", label)),
+        ),
+        area,
     );
 }
 
@@ -136,90 +110,112 @@ fn format_scan_time(ms: u128) -> String {
     }
 }
 
-fn render_help_overlay(
-    frame: &mut Frame,
-    area: ratatui::layout::Rect,
-    _app: &App,
-    theme: &theme::Theme,
-) {
-    use ratatui::text::{Line, Span};
-    use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-
-    let help_text = vec![
-        Line::from(Span::styled("  Keyboard Shortcuts", theme.title)),
-        Line::from(""),
-        Line::from(Span::styled("  Navigation", theme.filter)),
-        Line::from("    ↑ / k       Move up"),
-        Line::from("    ↓ / j       Move down"),
-        Line::from("    PageUp      Move up 10"),
-        Line::from("    PageDown    Move down 10"),
-        Line::from("    Home        First project"),
-        Line::from("    End         Last project"),
-        Line::from(""),
-        Line::from(Span::styled("  Actions", theme.filter)),
-        Line::from("    /           Search"),
-        Line::from("    f           Cycle filter"),
-        Line::from("    s           Cycle sort"),
-        Line::from("    r           Reload scan"),
-        Line::from("    n           Edit note"),
-        Line::from("    m           Change status"),
-        Line::from("    o           Open action menu"),
-        Line::from("    ,           Config action menu"),
-        Line::from("    Enter       Record visit"),
-        Line::from("    D           Toggle compact / detailed"),
-        Line::from(""),
-        Line::from(Span::styled("  Modes", theme.filter)),
-        Line::from("    Search      Type to filter, Backspace deletes, Enter accepts"),
-        Line::from("    Note        Type to edit, Backspace deletes, Enter saves"),
-        Line::from("    Status      ↑ / ↓ choose status, Enter confirms"),
-        Line::from("    Open        Press an action key from the footer menu"),
-        Line::from("    Config      Press an action key to open the config dir"),
-        Line::from(""),
-        Line::from(Span::styled("  General", theme.filter)),
-        Line::from("    ?           This help"),
-        Line::from("    Esc         Cancel / back"),
-        Line::from("    q / Q       Quit"),
-        Line::from(""),
-        Line::from(Span::styled("  Press Esc or ? to close", theme.dim)),
+fn help_lines(theme: &Theme) -> Vec<Line<'static>> {
+    let groups = [
+        (
+            "Navigation",
+            vec![
+                "↑ / k, ↓ / j   Select project / scroll focused details",
+                "PageUp / PageDown   Move a page",
+                "Home / End   First / last item",
+                "Tab   Switch list / details focus",
+            ],
+        ),
+        (
+            "Actions",
+            vec![
+                "/   Search projects",
+                "f   Cycle filter",
+                "s   Cycle sort",
+                "r   Reload scan",
+                "n   Edit note",
+                "m   Change status",
+                "o   Open action menu",
+                ",   Open config action menu",
+                "Enter   Record visit",
+                "D   Toggle compact / detailed",
+            ],
+        ),
+        (
+            "Modes",
+            vec![
+                "Search: type, Backspace deletes, Enter keeps filter",
+                "Note: type, Backspace deletes, Enter saves",
+                "Menus: arrows select, Enter confirms, or action key",
+                "Esc   Cancel mode; in list, clear search",
+                "Help: arrows / PageUp / PageDown / Home / End scroll",
+            ],
+        ),
+        (
+            "General",
+            vec![
+                "?   Show / close help",
+                "q / Q   Quit (q closes help first)",
+                "Ctrl+C   Quit",
+            ],
+        ),
     ];
-
-    let block = Block::default()
-        .title(" Help ")
-        .borders(Borders::ALL)
-        .border_style(theme.border);
-
-    let paragraph = Paragraph::new(help_text).block(block);
-
-    // Center the help window
-    let area = centered_rect(60, 70, area);
-    frame.render_widget(Clear, area);
-    frame.render_widget(paragraph, area);
+    let mut lines = Vec::new();
+    for (name, items) in groups {
+        lines.push(Line::from(Span::styled(
+            format!(" {}", name),
+            theme.section_title,
+        )));
+        for item in items {
+            lines.push(Line::from(Span::styled(format!("   {}", item), theme.text)));
+        }
+        lines.push(Line::default());
+    }
+    lines
 }
 
-fn centered_rect(
-    percent_x: u16,
-    percent_y: u16,
-    r: ratatui::layout::Rect,
-) -> ratatui::layout::Rect {
-    use ratatui::layout::{Constraint, Direction, Layout};
+pub fn help_scroll_limit(app: &App) -> usize {
+    let area = text::popup(Rect::new(0, 0, app.viewport.0, app.viewport.1), 82, 36);
+    text::wrap(
+        help_lines(&Theme::named(&app.config.ui.theme)),
+        area.width.saturating_sub(2),
+    )
+    .len()
+    .saturating_sub(area.height.saturating_sub(3) as usize)
+}
 
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    let horizontal = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1]);
-
-    horizontal[1]
+fn render_help_overlay(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    let area = text::popup(area, 82, 36);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.title)
+        .title(" Help ")
+        .title_bottom(" ↑↓ scroll | PgUp/PgDn | Esc / ? close ");
+    let inner = block.inner(area);
+    let lines = text::wrap(help_lines(theme), inner.width);
+    let visible = inner.height.saturating_sub(1) as usize;
+    let scroll = app.help_scroll.min(lines.len().saturating_sub(visible));
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(
+            lines
+                .iter()
+                .skip(scroll)
+                .take(visible)
+                .cloned()
+                .collect::<Vec<_>>(),
+        ),
+        Rect::new(inner.x, inner.y, inner.width, visible as u16),
+    );
+    frame.render_widget(
+        Paragraph::new(format!(
+            " {}-{}/{}",
+            if lines.is_empty() { 0 } else { scroll + 1 },
+            (scroll + visible).min(lines.len()),
+            lines.len()
+        ))
+        .style(theme.muted),
+        Rect::new(
+            inner.x,
+            inner.y + inner.height.saturating_sub(1),
+            inner.width,
+            inner.height.min(1),
+        ),
+    );
 }

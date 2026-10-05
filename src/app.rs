@@ -27,6 +27,13 @@ pub struct PendingOpenAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
     Compact,
     Detailed,
@@ -160,9 +167,14 @@ pub struct App {
     pub status_options: Vec<ProjectStatus>,
     pub status_selected: usize,
     pub help_scroll: usize,
+    pub details_scroll: usize,
+    pub details_focus: bool,
+    pub menu_selected: usize,
+    pub viewport: (u16, u16),
     pub should_quit: bool,
     pub needs_reload: bool,
     pub status_message: Option<String>,
+    pub message_level: MessageLevel,
     pub view_mode: ViewMode,
     pub pending_action: Option<PendingOpenAction>,
     pub ports_rx: Option<mpsc::Receiver<HashMap<String, Vec<u16>>>>,
@@ -173,7 +185,17 @@ pub struct App {
 }
 
 impl App {
+    pub fn set_message(&mut self, message: String, level: MessageLevel) {
+        self.status_message = Some(message);
+        self.message_level = level;
+    }
+
     pub fn new(config: Config) -> Self {
+        let view_mode = if config.ui.right_panel {
+            ViewMode::Detailed
+        } else {
+            ViewMode::Compact
+        };
         let mut app = Self {
             config,
             projects: Vec::new(),
@@ -195,10 +217,15 @@ impl App {
             ],
             status_selected: 0,
             help_scroll: 0,
+            details_scroll: 0,
+            details_focus: false,
+            menu_selected: 0,
+            viewport: (80, 24),
             should_quit: false,
             needs_reload: true,
             status_message: None,
-            view_mode: ViewMode::Detailed,
+            message_level: MessageLevel::Info,
+            view_mode,
             pending_action: None,
             ports_rx: None,
             hydration_generation: 0,
@@ -217,10 +244,10 @@ impl App {
                     .is_some_and(|c| tui_apps.contains(&c));
 
             if is_tui && !action.terminal_mode {
-                app.status_message = Some(format!(
+                app.set_message(format!(
                     "Warning: action '{}' is configured with terminal_mode=false. This may cause visual glitches. Set terminal_mode=true.",
                     action.name
-                ));
+                ), crate::app::MessageLevel::Warning);
                 break;
             }
         }
@@ -444,6 +471,8 @@ impl App {
     }
 
     pub fn toggle_view(&mut self) {
+        self.details_focus = false;
+        self.details_scroll = 0;
         self.view_mode = match self.view_mode {
             ViewMode::Compact => ViewMode::Detailed,
             ViewMode::Detailed => ViewMode::Compact,
@@ -554,7 +583,10 @@ impl App {
                 true
             }
             Err(error) => {
-                self.status_message = Some(format!("Could not save config: {error:#}"));
+                self.set_message(
+                    format!("Could not save config: {error:#}"),
+                    crate::app::MessageLevel::Error,
+                );
                 false
             }
         }

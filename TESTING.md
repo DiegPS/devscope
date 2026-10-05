@@ -23,13 +23,13 @@ En PowerShell, comprobar `$LASTEXITCODE` antes de continuar al comando siguiente
 - UI: todos los modos, listas vacías/con datos, vistas compacta/detallada, tamaños desde 1 × 1 hasta 160 × 45, contenido Unicode largo, estados Git y detalles completos. Las assertions de contenido verifican elementos importantes sin fijar el diseño por píxel.
 - CLI: parsing de comandos, argumentos inválidos, resolución exacta/parcial/ambigua, mutations sobre config temporal y scan/list. Los tests de integración invocan el ejecutable real para ayuda/version/errores, verificando códigos de salida, stdout y stderr.
 
-En Windows, la tanda local tiene **128 pruebas normales aprobadas** (125 unitarias/de contratos y 3 de integración), más **cuatro escenarios PTY** aprobados. Los conteos varían por plataforma.
+En Windows, la tanda local tiene **138 pruebas normales aprobadas** (135 unitarias/de contratos y 3 de integración), más **siete escenarios PTY** aprobados. Los conteos varían por plataforma. La ampliación de diseño comprueba ayuda desplazable, acceso a detalles largos y todos sus avisos, búsqueda confirmada, estados vacíos, edición larga, menús con flechas/Enter, errores, preferencias visuales, nueve proyectos visibles en 80×24 y ausencia del campo Name redundante.
 
 ## Terminal real y aislamiento
 
-`scripts/test_tui.py` utiliza ConPTY en Windows y `pty`/termios en Linux/macOS, sin bibliotecas Python externas. Ejecuta el binario de unit tests en un proceso separado y un entry point exclusivo de tests. Cubre q, búsqueda/cancelación, menú/cancelación y Ctrl+C; comprueba salida cero, abandono de pantalla alternativa y cursor restaurado. En Unix también compara la configuración termios anterior/posterior.
+`scripts/test_tui.py` utiliza ConPTY en Windows y `pty`/termios en Linux/macOS, sin bibliotecas Python externas. Ejecuta el binario de unit tests en un proceso separado y un entry point exclusivo de tests. Cubre q, búsqueda/cancelación, menú/cancelación, desplazamiento de ayuda, foco/desplazamiento de detalles, navegación de menú y Ctrl+C; comprueba salida cero, abandono de pantalla alternativa y cursor restaurado. En Unix también compara la configuración termios anterior/posterior.
 
-`tui::tests::real_terminal_child` figura como ignored en `cargo test` porque necesita esa terminal real y sus fixtures; **el script lo ejecuta explícitamente cuatro veces**. El workflow hace obligatoria la ejecución del script. No es un defecto de producto silenciado.
+`tui::tests::real_terminal_child` figura como ignored en `cargo test` porque necesita esa terminal real y sus fixtures; **el script lo ejecuta explícitamente siete veces**. El workflow hace obligatoria la ejecución del script. No es un defecto de producto silenciado.
 
 La configuración se inyecta solo bajo `cfg(test)` mediante un scope thread-local con restauración RAII, probado también durante panic y entre hilos. La app de producción mantiene exactamente su ubicación de configuración. No se cambia PATH, HOME, APPDATA ni el directorio de trabajo global del proceso de pruebas. Las carpetas temporales y subprocesses se limpian al terminar.
 
@@ -49,7 +49,7 @@ El script recoge unit tests, integración CLI y sesiones PTY instrumentadas en u
 
 El gate inicial es **75 % de líneas**. Se excluyen los archivos de pruebas independientes del informe; las pruebas inline dentro de módulos Rust siguen en las estadísticas de LLVM. Por ello el porcentaje representa los archivos instrumentados reportados, no una medida exacta aislada de producción. No se presume cobertura de ramas, cobertura de código C/libgit2 ni ausencia de defectos. El informe por archivo identifica dónde falta trabajo, especialmente lanzamientos externos, errores de terminal y autodiscovery del entorno.
 
-La medición local con la ampliación Git/UI fue **81,26 % de líneas** (4.769 de 5.869), incluyendo las sesiones PTY instrumentadas. El informe generado es la referencia para el porcentaje de cada commit.
+La medición local después de las correcciones de diseño fue **81,41 % de líneas** (5.037 de 6.187), incluyendo las sesiones PTY instrumentadas. El informe generado es la referencia para el porcentaje de cada commit.
 
 ## Automatización de GitHub
 

@@ -41,6 +41,8 @@ impl Drop for TerminalGuard {
 
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> Result<()> {
     loop {
+        let size = terminal.size()?;
+        app.viewport = (size.width, size.height);
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         if let Some(ref rx) = app.ports_rx {
@@ -101,11 +103,17 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
             OpenActionKind::FileManager => {
                 match open::that(path) {
                     Ok(()) => {
-                        app.status_message = Some(format!("Opened folder: {}", name));
+                        app.set_message(
+                            format!("Opened folder: {}", name),
+                            crate::app::MessageLevel::Info,
+                        );
                         record_open(app, path);
                     }
                     Err(e) => {
-                        app.status_message = Some(format!("Could not open folder. {}", e));
+                        app.set_message(
+                            format!("Could not open folder. {}", e),
+                            crate::app::MessageLevel::Error,
+                        );
                     }
                 }
                 return;
@@ -125,20 +133,29 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
                 match target {
                     Some(t) if t.exists() => {
                         if let Err(e) = open::that(t) {
-                            app.status_message =
-                                Some(format!("Could not open build output. {}", e));
+                            app.set_message(
+                                format!("Could not open build output. {}", e),
+                                crate::app::MessageLevel::Error,
+                            );
                         } else {
-                            app.status_message = Some(format!("Opened build output: {}", name));
+                            app.set_message(
+                                format!("Opened build output: {}", name),
+                                crate::app::MessageLevel::Info,
+                            );
                             record_open(app, path);
                         }
                     }
                     Some(_) => {
-                        app.status_message =
-                            Some("Build output not found. Run a build first.".to_string());
+                        app.set_message(
+                            "Build output not found. Run a build first.".to_string(),
+                            crate::app::MessageLevel::Warning,
+                        );
                     }
                     None => {
-                        app.status_message =
-                            Some("No artifacts detected. Run a build first.".to_string());
+                        app.set_message(
+                            "No artifacts detected. Run a build first.".to_string(),
+                            crate::app::MessageLevel::Info,
+                        );
                     }
                 }
                 return;
@@ -155,15 +172,23 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
                 match exe {
                     Some(a) => {
                         if let Err(e) = open::that(&a.path) {
-                            app.status_message = Some(format!("Could not open executable. {}", e));
+                            app.set_message(
+                                format!("Could not open executable. {}", e),
+                                crate::app::MessageLevel::Error,
+                            );
                         } else {
-                            app.status_message = Some(format!("Opened executable: {}", name));
+                            app.set_message(
+                                format!("Opened executable: {}", name),
+                                crate::app::MessageLevel::Info,
+                            );
                             record_open(app, path);
                         }
                     }
                     None => {
-                        app.status_message =
-                            Some("No executable found. Run a build first.".to_string());
+                        app.set_message(
+                            "No executable found. Run a build first.".to_string(),
+                            crate::app::MessageLevel::Warning,
+                        );
                     }
                 }
                 return;
@@ -173,7 +198,10 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
     }
 
     let Some(command) = &action.command else {
-        app.status_message = Some(format!("No command configured for '{}'", action.name));
+        app.set_message(
+            format!("No command configured for '{}'", action.name),
+            crate::app::MessageLevel::Error,
+        );
         return;
     };
 
@@ -184,11 +212,17 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
         match suspend_and_run(&resolved, &args, action.current_dir, path, &action.env) {
             Ok(status) if status.success() => true,
             Ok(status) => {
-                app.status_message = Some(format!("{} exited with {}", action.name, status));
+                app.set_message(
+                    format!("{} exited with {}", action.name, status),
+                    crate::app::MessageLevel::Error,
+                );
                 false
             }
             Err(error) => {
-                app.status_message = Some(format!("Could not open {}: {error:#}", action.name));
+                app.set_message(
+                    format!("Could not open {}: {error:#}", action.name),
+                    crate::app::MessageLevel::Error,
+                );
                 false
             }
         }
@@ -211,14 +245,20 @@ fn execute_open_action(pending: &crate::app::PendingOpenAction, app: &mut App) {
                 std::thread::spawn(move || {
                     let _ = child.wait();
                 });
-                app.status_message = Some(format!("Opened {}: {}", action.name, name));
+                app.set_message(
+                    format!("Opened {}: {}", action.name, name),
+                    crate::app::MessageLevel::Info,
+                );
                 true
             }
             Err(e) => {
-                app.status_message = Some(format!(
-                    "Could not open {}. Check config or PATH. ({})",
-                    action.name, e
-                ));
+                app.set_message(
+                    format!(
+                        "Could not open {}. Check config or PATH. ({})",
+                        action.name, e
+                    ),
+                    crate::app::MessageLevel::Error,
+                );
                 false
             }
         }

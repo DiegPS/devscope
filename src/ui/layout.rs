@@ -21,7 +21,9 @@ pub fn create_content_layout(area: Rect, view_mode: ViewMode) -> Vec<Rect> {
         return vec![area];
     }
 
-    let use_vertical = area.width < 125;
+    // Preserve the original list density: side-by-side from 125 columns.
+    // Short windows also benefit from full-height panels at 110 columns.
+    let use_vertical = area.width < 125 && !(area.width >= 110 && area.height < 22);
 
     let (direction, constraints) = if use_vertical {
         (
@@ -31,7 +33,10 @@ pub fn create_content_layout(area: Rect, view_mode: ViewMode) -> Vec<Rect> {
     } else {
         (
             Direction::Horizontal,
-            vec![Constraint::Percentage(60), Constraint::Percentage(40)],
+            vec![
+                Constraint::Min(48),
+                Constraint::Length((area.width / 3).max(48)),
+            ],
         )
     };
 

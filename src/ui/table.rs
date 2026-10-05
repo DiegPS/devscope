@@ -10,6 +10,26 @@ use crate::project::{DirtyStatus, HealthLevel, ProjectStatus};
 use crate::ui::theme::Theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
+    if app.filtered_indices.is_empty() {
+        let message = if app.total_projects == 0 {
+            "No projects found.\nAdd a root with: ds add <path>\nThen press r to scan again."
+        } else {
+            "No matching projects.\nPress Esc to clear search; f changes the active filter."
+        };
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new(message)
+                .wrap(ratatui::widgets::Wrap { trim: false })
+                .style(theme.muted)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(theme.border)
+                        .title(build_title(0, 0, 0, 0, app, area.width)),
+                ),
+            area,
+        );
+        return;
+    }
     let inner_w = area.width.saturating_sub(2).max(1);
     let layout = resolve_layout(area, app.view_mode);
     let resolved_widths = layout.resolved_widths(inner_w);
@@ -61,14 +81,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 Some(git) => format_git_label(git),
                 None => "\u{2014}".to_string(),
             };
-            let git_style = if project
-                .git
-                .as_ref()
-                .is_some_and(|git| git.dirty_status == DirtyStatus::Dirty)
-            {
-                theme.dirty
-            } else {
-                theme.clean
+            let git_style = match project.git.as_ref().map(|g| g.dirty_status) {
+                Some(DirtyStatus::Dirty) => theme.dirty,
+                Some(DirtyStatus::Clean) => theme.clean,
+                Some(DirtyStatus::Error) => theme.health_bad,
+                _ => theme.dim,
             };
 
             let health_style = match project.health.level {
@@ -83,6 +100,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 HealthLevel::Bad => "\u{2717}",
                 HealthLevel::Unknown => "\u{2014}",
             };
+            let health_symbol = if app.config.ui.show_icons {
+                health_symbol.to_string()
+            } else if project.health.level == HealthLevel::Unknown {
+                "n/a".to_string()
+            } else {
+                project.health.level.as_str().to_string()
+            };
 
             let name = truncate_end(&project.name, layout.cell_width(&resolved_widths, 0));
             let stack_str = project.stack.join(" + ");
@@ -95,18 +119,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
             let stack_cell = Cell::from(Line::from(if is_selected {
                 vec![Span::styled(stack.clone(), row_style)]
             } else {
-                colorize_stack(&stack, theme.stack)
+                if app.config.ui.theme.eq_ignore_ascii_case("light") {
+                    vec![Span::styled(stack.clone(), theme.stack)]
+                } else {
+                    colorize_stack(&stack, theme.stack)
+                }
             }));
             let health_cell = Cell::from(Line::from(Span::styled(
                 health_symbol.to_string(),
-                if is_selected { row_style } else { health_style },
+                health_style,
             )));
 
             let row = match layout.kind {
                 LayoutKind::CompactNarrow => {
                     let git_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&git_label, layout.cell_width(&resolved_widths, 3)),
-                        if is_selected { row_style } else { git_style },
+                        git_style,
                     )));
                     let activity = project.activity.relative_time();
                     let activity_cell = Cell::from(Line::from(Span::styled(
@@ -137,11 +165,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     )));
                     let git_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&git_label, layout.cell_width(&resolved_widths, 3)),
-                        if is_selected { row_style } else { git_style },
+                        git_style,
                     )));
                     let ports_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&ports, ports_width),
-                        if is_selected { row_style } else { ports_style },
+                        ports_style,
                     )));
                     Row::new(vec![
                         name_cell,
@@ -175,7 +203,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                             row_style,
                         )]
                     } else {
-                        colorize_stack(&truncate_end(&stack_str, stack_width), theme.stack)
+                        if app.config.ui.theme.eq_ignore_ascii_case("light") {
+                            vec![Span::styled(
+                                truncate_end(&stack_str, stack_width),
+                                theme.stack,
+                            )]
+                        } else {
+                            colorize_stack(&truncate_end(&stack_str, stack_width), theme.stack)
+                        }
                     }));
                     let activity_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&activity, layout.cell_width(&resolved_widths, 2)),
@@ -183,11 +218,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     )));
                     let git_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&git_label, layout.cell_width(&resolved_widths, 3)),
-                        if is_selected { row_style } else { git_style },
+                        git_style,
                     )));
                     let ports_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&ports, ports_width),
-                        if is_selected { row_style } else { ports_style },
+                        ports_style,
                     )));
                     let note_cell = Cell::from(Line::from(Span::styled(
                         note,
@@ -212,7 +247,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     )));
                     let git_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&git_label, layout.cell_width(&resolved_widths, 3)),
-                        if is_selected { row_style } else { git_style },
+                        git_style,
                     )));
                     Row::new(vec![
                         name_cell,
@@ -226,7 +261,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                 LayoutKind::DetailedNarrow => {
                     let git_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&git_label, layout.cell_width(&resolved_widths, 2)),
-                        if is_selected { row_style } else { git_style },
+                        git_style,
                     )));
                     Row::new(vec![name_cell, stack_cell, git_cell, health_cell]).style(row_style)
                 }
@@ -242,7 +277,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                             project.status.as_str(),
                             layout.cell_width(&resolved_widths, 3),
                         ),
-                        if is_selected { row_style } else { status_style },
+                        status_style,
                     )));
                     let activity_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&activity, layout.cell_width(&resolved_widths, 2)),
@@ -250,7 +285,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
                     )));
                     let git_cell = Cell::from(Line::from(Span::styled(
                         truncate_end(&git_label, layout.cell_width(&resolved_widths, 4)),
-                        if is_selected { row_style } else { git_style },
+                        git_style,
                     )));
                     let note_cell = Cell::from(Line::from(Span::styled(
                         note,
@@ -273,11 +308,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, theme: &Theme) {
         }
     }
 
-    let title = build_title(total, scroll, rows.len(), visible_rows, app);
+    let title = build_title(total, scroll, rows.len(), visible_rows, app, area.width);
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(theme.border)
+        .border_style(if !app.details_focus {
+            theme.title
+        } else {
+            theme.border
+        })
         .title(Span::styled(title, theme.header));
 
     let table = Table::new(rows, layout.widths)
@@ -333,13 +372,13 @@ fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
             let name_cap = cap_name_width(width, 18, 26);
             return TableLayout {
                 kind: LayoutKind::CompactNarrow,
-                headers: &["Name", "Stack", "Act", "Git", "H"],
+                headers: &["Name", "Stack", "Active", "Git", "Health"],
                 widths: vec![
                     Constraint::Max(name_cap),
                     Constraint::Min(16),
-                    Constraint::Length(6),
+                    Constraint::Length(7),
                     Constraint::Length(14),
-                    Constraint::Length(3),
+                    Constraint::Length(6),
                 ],
             };
         }
@@ -348,14 +387,14 @@ fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
             let name_cap = cap_name_width(width, 20, 30);
             return TableLayout {
                 kind: LayoutKind::CompactMedium,
-                headers: &["Name", "Stack", "Act", "Git", "Ports", "H"],
+                headers: &["Name", "Stack", "Active", "Git", "Ports", "Health"],
                 widths: vec![
                     Constraint::Max(name_cap),
                     Constraint::Min(18),
-                    Constraint::Length(6),
+                    Constraint::Length(7),
                     Constraint::Length(14),
                     Constraint::Length(8),
-                    Constraint::Length(3),
+                    Constraint::Length(6),
                 ],
             };
         }
@@ -363,7 +402,7 @@ fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
         let name_cap = cap_name_width(width, 22, 32);
         return TableLayout {
             kind: LayoutKind::CompactWide,
-            headers: &["Name", "Stack", "Act", "Git", "Ports", "Note", "H"],
+            headers: &["Name", "Stack", "Active", "Git", "Ports", "Note", "Health"],
             widths: vec![
                 Constraint::Max(name_cap),
                 Constraint::Min(18),
@@ -371,7 +410,7 @@ fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
                 Constraint::Length(14),
                 Constraint::Length(8),
                 Constraint::Min(12),
-                Constraint::Length(3),
+                Constraint::Length(6),
             ],
         };
     }
@@ -380,12 +419,12 @@ fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
         let name_cap = cap_name_width(width, 18, 24);
         return TableLayout {
             kind: LayoutKind::DetailedNarrow,
-            headers: &["Name", "Stack", "Git", "H"],
+            headers: &["Name", "Stack", "Git", "Health"],
             widths: vec![
                 Constraint::Max(name_cap),
                 Constraint::Min(16),
                 Constraint::Length(14),
-                Constraint::Length(3),
+                Constraint::Length(6),
             ],
         };
     }
@@ -394,13 +433,13 @@ fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
         let name_cap = cap_name_width(width, 20, 30);
         return TableLayout {
             kind: LayoutKind::DetailedMedium,
-            headers: &["Name", "Stack", "Act", "Git", "H"],
+            headers: &["Name", "Stack", "Active", "Git", "Health"],
             widths: vec![
                 Constraint::Max(name_cap),
                 Constraint::Min(18),
                 Constraint::Length(6),
                 Constraint::Length(15),
-                Constraint::Length(3),
+                Constraint::Length(6),
             ],
         };
     }
@@ -408,7 +447,7 @@ fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
     let name_cap = cap_name_width(width, 22, 32);
     TableLayout {
         kind: LayoutKind::DetailedWide,
-        headers: &["Name", "Stack", "Act", "Status", "Git", "Note", "H"],
+        headers: &["Name", "Stack", "Active", "Status", "Git", "Note", "Health"],
         widths: vec![
             Constraint::Max(name_cap),
             Constraint::Min(18),
@@ -416,7 +455,7 @@ fn resolve_layout(area: Rect, view_mode: ViewMode) -> TableLayout {
             Constraint::Length(8),
             Constraint::Length(15),
             Constraint::Min(12),
-            Constraint::Length(3),
+            Constraint::Length(6),
         ],
     }
 }
@@ -431,24 +470,42 @@ fn build_title(
     shown: usize,
     visible_rows: usize,
     app: &App,
+    width: u16,
 ) -> String {
+    use unicode_width::UnicodeWidthStr;
     let prefix = if total > visible_rows {
         format!(
-            " Projects {}-{} / {} ",
+            " Projects {}-{}/{}",
             scroll + 1,
             (scroll + shown).min(total),
             total
         )
     } else {
-        format!(" Projects {} ", total)
+        format!(" Projects {}", total)
     };
-
-    format!(
-        "{}\u{00B7} {} \u{00B7} {} ",
-        prefix,
-        app.sort.as_str(),
-        app.view_mode.as_str()
-    )
+    let max_width = width.saturating_sub(2) as usize;
+    let mut title = format!("{} · filter: {}", prefix, app.filter.as_str());
+    if !app.search_query.is_empty() {
+        let label = " · search: ";
+        let hint = " [Esc clear]";
+        let budget = max_width.saturating_sub(title.width() + label.width() + hint.width() + 1);
+        title.push_str(label);
+        title.push_str(&truncate_end(
+            &app.search_query.replace(['\n', '\r', '\t'], " "),
+            budget,
+        ));
+        title.push_str(hint);
+    }
+    for extra in [
+        format!(" · sort: {}", app.sort.as_str()),
+        format!(" · {}", app.view_mode.as_str()),
+    ] {
+        if title.width() + extra.width() < max_width {
+            title.push_str(&extra);
+        }
+    }
+    title.push(' ');
+    truncate_end(&title, max_width)
 }
 
 fn calc_scroll(selected: usize, visible_rows: usize, total: usize) -> usize {

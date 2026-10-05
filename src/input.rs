@@ -3,7 +3,22 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::app::{App, Mode, PendingOpenAction, ViewMode};
 
 pub fn handle_key_event(app: &mut App, key: KeyEvent) {
-    app.status_message = None;
+    let navigation = matches!(
+        key.code,
+        KeyCode::Up
+            | KeyCode::Down
+            | KeyCode::PageUp
+            | KeyCode::PageDown
+            | KeyCode::Home
+            | KeyCode::End
+            | KeyCode::Tab
+            | KeyCode::BackTab
+    ) || (app.mode == Mode::Normal
+        && matches!(key.code, KeyCode::Char('j' | 'k')));
+    if !navigation {
+        app.status_message = None;
+    }
+    let selected = app.selected_project().map(|p| p.id.clone());
 
     match app.mode {
         Mode::Normal => handle_normal_mode(app, key),
@@ -14,9 +29,49 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) {
         Mode::OpenMenu => handle_open_menu(app, key),
         Mode::ConfigMenu => handle_config_menu(app, key),
     }
+    if selected != app.selected_project().map(|p| p.id.clone()) {
+        app.details_scroll = 0;
+    }
 }
 
 fn handle_normal_mode(app: &mut App, key: KeyEvent) {
+    if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) && app.view_mode == ViewMode::Detailed {
+        app.details_focus = !app.details_focus;
+        return;
+    }
+    if app.details_focus {
+        let limit = crate::ui::details::scroll_limit(app);
+        app.details_scroll = app.details_scroll.min(limit);
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.details_scroll = app.details_scroll.saturating_sub(1)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                app.details_scroll = app.details_scroll.saturating_add(1).min(limit)
+            }
+            KeyCode::PageUp => app.details_scroll = app.details_scroll.saturating_sub(10),
+            KeyCode::PageDown => {
+                app.details_scroll = app.details_scroll.saturating_add(10).min(limit)
+            }
+            KeyCode::Home => app.details_scroll = 0,
+            KeyCode::End => app.details_scroll = limit,
+            KeyCode::Esc => app.details_focus = false,
+            _ => {}
+        }
+        if matches!(
+            key.code,
+            KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::PageUp
+                | KeyCode::PageDown
+                | KeyCode::Home
+                | KeyCode::End
+                | KeyCode::Esc
+                | KeyCode::Char('j' | 'k')
+        ) {
+            return;
+        }
+    }
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
         KeyCode::Char('Q') => app.should_quit = true,
@@ -60,25 +115,37 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char('o') => {
+            app.menu_selected = 0;
             if app.config.open.actions.is_empty() {
-                app.status_message = Some("No open actions configured".to_string());
+                app.set_message(
+                    "No open actions configured".to_string(),
+                    crate::app::MessageLevel::Warning,
+                );
             } else {
                 app.mode = Mode::OpenMenu;
             }
         }
         KeyCode::Char(',') => {
+            app.menu_selected = 0;
             if app.config.open.actions.is_empty() {
-                app.status_message = Some("No open actions configured".to_string());
+                app.set_message(
+                    "No open actions configured".to_string(),
+                    crate::app::MessageLevel::Warning,
+                );
             } else {
                 app.mode = Mode::ConfigMenu;
             }
         }
         KeyCode::Char('D') => {
+            app.details_focus = false;
             app.toggle_view();
-            app.status_message = Some(match app.view_mode {
-                ViewMode::Compact => "Compact view".to_string(),
-                ViewMode::Detailed => "Detailed view".to_string(),
-            });
+            app.set_message(
+                match app.view_mode {
+                    ViewMode::Compact => "Compact view".to_string(),
+                    ViewMode::Detailed => "Detailed view".to_string(),
+                },
+                crate::app::MessageLevel::Info,
+            );
         }
         KeyCode::Char('?') => {
             app.mode = Mode::Help;
@@ -198,12 +265,17 @@ fn editing_project_index(app: &mut App) -> Option<usize> {
         .as_ref()
         .and_then(|id| app.projects.iter().position(|project| &project.id == id));
     if index.is_none() {
-        app.status_message = Some("The project being edited is no longer available".to_string());
+        app.set_message(
+            "The project being edited is no longer available".to_string(),
+            crate::app::MessageLevel::Warning,
+        );
     }
     index
 }
 
 fn handle_help_mode(app: &mut App, key: KeyEvent) {
+    let limit = crate::ui::help_scroll_limit(app);
+    app.help_scroll = app.help_scroll.min(limit);
     match key.code {
         KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q') => {
             app.mode = Mode::Normal;
@@ -212,13 +284,21 @@ fn handle_help_mode(app: &mut App, key: KeyEvent) {
             app.help_scroll = app.help_scroll.saturating_sub(1);
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            app.help_scroll += 1;
+            app.help_scroll = app.help_scroll.saturating_add(1).min(limit);
         }
+        KeyCode::PageUp => app.help_scroll = app.help_scroll.saturating_sub(10),
+        KeyCode::PageDown => app.help_scroll = app.help_scroll.saturating_add(10).min(limit),
+        KeyCode::Home => app.help_scroll = 0,
+        KeyCode::End => app.help_scroll = limit,
         _ => {}
     }
 }
 
 fn handle_open_menu(app: &mut App, key: KeyEvent) {
+    if navigate_menu(app, key) {
+        return;
+    }
+    let key = menu_confirmation(app, key);
     match key.code {
         KeyCode::Esc => {
             app.mode = Mode::Normal;
@@ -249,8 +329,10 @@ fn handle_open_menu(app: &mut App, key: KeyEvent) {
                     app.mode = Mode::Normal;
                 }
                 None => {
-                    app.status_message =
-                        Some(format!("No open action for key '{}'. Esc to cancel.", c));
+                    app.set_message(
+                        format!("No open action for key '{}'. Esc to cancel.", c),
+                        crate::app::MessageLevel::Warning,
+                    );
                     app.mode = Mode::Normal;
                 }
             }
@@ -260,6 +342,10 @@ fn handle_open_menu(app: &mut App, key: KeyEvent) {
 }
 
 fn handle_config_menu(app: &mut App, key: KeyEvent) {
+    if navigate_menu(app, key) {
+        return;
+    }
+    let key = menu_confirmation(app, key);
     match key.code {
         KeyCode::Esc => {
             app.mode = Mode::Normal;
@@ -277,7 +363,10 @@ fn handle_config_menu(app: &mut App, key: KeyEvent) {
                     let config_dir = match crate::config::config_dir() {
                         Ok(d) => d,
                         Err(_) => {
-                            app.status_message = Some("Could not find config dir".to_string());
+                            app.set_message(
+                                "Could not find config dir".to_string(),
+                                crate::app::MessageLevel::Error,
+                            );
                             app.mode = Mode::Normal;
                             return;
                         }
@@ -291,14 +380,39 @@ fn handle_config_menu(app: &mut App, key: KeyEvent) {
                     app.mode = Mode::Normal;
                 }
                 None => {
-                    app.status_message =
-                        Some(format!("No open action for key '{}'. Esc to cancel.", c));
+                    app.set_message(
+                        format!("No open action for key '{}'. Esc to cancel.", c),
+                        crate::app::MessageLevel::Warning,
+                    );
                     app.mode = Mode::Normal;
                 }
             }
         }
         _ => {}
     }
+}
+
+fn navigate_menu(app: &mut App, key: KeyEvent) -> bool {
+    let last = app.config.open.actions.len().saturating_sub(1);
+    match key.code {
+        KeyCode::Up => app.menu_selected = app.menu_selected.saturating_sub(1),
+        KeyCode::Down => app.menu_selected = app.menu_selected.saturating_add(1).min(last),
+        KeyCode::Home => app.menu_selected = 0,
+        KeyCode::End => app.menu_selected = last,
+        KeyCode::PageUp => app.menu_selected = app.menu_selected.saturating_sub(10),
+        KeyCode::PageDown => app.menu_selected = app.menu_selected.saturating_add(10).min(last),
+        _ => return false,
+    }
+    true
+}
+
+fn menu_confirmation(app: &App, key: KeyEvent) -> KeyEvent {
+    if key.code == KeyCode::Enter {
+        if let Some(action) = app.config.open.actions.get(app.menu_selected) {
+            return KeyEvent::new(KeyCode::Char(action.key_char()), key.modifiers);
+        }
+    }
+    key
 }
 
 #[cfg(test)]

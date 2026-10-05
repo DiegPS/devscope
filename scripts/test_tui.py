@@ -198,7 +198,16 @@ def main():
     args = parser.parse_args()
     binary = str(Path(args.binary or test_binary()).resolve())
     session_factory = windows_session if os.name == "nt" else posix_session
-    for name, keys in [("quit", [b"q"]), ("search then cancel", [b"/qq", b"\x1b", b"q"]), ("menu then cancel", [b"o", b"\x1b", b"q"]), ("Ctrl+C", [b"\x03"])]:
+    scenarios = [
+        ("quit", [b"q"]),
+        ("search then cancel", [b"/qq", b"\x1b", b"q"]),
+        ("menu then cancel", [b"o", b"\x1b", b"q"]),
+        ("help scroll then close", [b"?", b"\x1b[F", b"\x1b", b"q"]),
+        ("details focus scroll then return", [b"\t", b"\x1b[F", b"\t", b"q"]),
+        ("menu navigate then cancel", [b"o", b"\x1b[F", b"\x1b", b"q"]),
+        ("Ctrl+C", [b"\x03"]),
+    ]
+    for name, keys in scenarios:
         with tempfile.TemporaryDirectory(prefix="ds-tui-test-") as root:
             Path(root, "Cargo.toml").write_text("[package]\nname='fixture'\nversion='0.1.0'\n", encoding="utf-8")
             env = {**os.environ, "DS_TEST_TUI_ROOT": root}
@@ -210,6 +219,10 @@ def main():
                     if part != keys[-1]:
                         time.sleep(.1)
                         assert session.poll() is None, "mode transition unexpectedly exited"
+                    if name == "help scroll then close" and part == b"\x1b[F":
+                        session.expect(b"Ctrl+C")
+                    if name == "details focus scroll then return" and part == b"\x1b[F":
+                        session.expect(b"Health")
                 assert session.wait() == 0, bytes(session.output)[-500:]
                 # Output can still be draining after process termination.
                 deadline = time.monotonic() + 2
